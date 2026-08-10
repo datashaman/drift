@@ -84,7 +84,34 @@ Drift is in the design and initial implementation phase. The first development b
 5. [Prove transport stability under simulated UI stress](https://github.com/datashaman/drift/issues/5)
 6. [Validate ten-minute playback through a real MIDI device](https://github.com/datashaman/drift/issues/6)
 
-There is no runnable application yet.
+The first application shell packages a React status interface inside a native JUCE window. Transport, MIDI, and the interactive phrase world arrive in later slices.
+
+## Development
+
+### Requirements
+
+- macOS 13 or newer
+- Xcode command-line tools
+- CMake 3.25 or newer
+- Node.js 24 and npm
+
+JUCE 9.0.0 is fetched and pinned by CMake. JavaScript dependencies are pinned by `ui/package-lock.json`.
+
+Run the full local verification path:
+
+```sh
+./scripts/verify.sh
+```
+
+Build and launch the debug application:
+
+```sh
+cmake --preset debug
+cmake --build --preset debug --target Drift
+open build/debug/Drift_artefacts/Debug/Drift.app
+```
+
+Release builds use the equivalent `release` preset.
 
 ## Documentation
 
