@@ -84,7 +84,7 @@ Drift is in the design and initial implementation phase. The first development b
 5. [Prove transport stability under simulated UI stress](https://github.com/datashaman/drift/issues/5)
 6. [Validate ten-minute playback through a real MIDI device](https://github.com/datashaman/drift/issues/6)
 
-The native shell now connects React Play, Stop, BPM, and MIDI-output controls to a native-owned monotonic transport and one hard-coded looping bass phrase. Drift schedules timestamped events to the selected external MIDI destination and executes a panic path on stop, output change, failure, and shutdown. The interactive phrase world arrives in later slices.
+The native shell now connects React Play, Stop, BPM, and MIDI-output controls to a native-owned monotonic transport and a four-role composition: drums, bass, chords, and melody. Drift schedules every phrase from the same transport to its assigned MIDI channel, publishes their stable identities and initial positions as an authoritative world snapshot, and executes a panic path on stop, output change, failure, and shutdown. Movement and direct manipulation arrive in the next spatial-world slices.
 
 The native/UI bridge uses a validated protocol-versioned envelope. Invalid commands produce structured rejection events without mutating engine state, and every React load performs a fresh handshake that restores the current authoritative transport state without restarting playback.
 

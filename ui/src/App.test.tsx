@@ -14,6 +14,7 @@ import {
   type JuceBackend,
   type TransportBridge,
   type TransportState,
+  type WorldSnapshot,
 } from './bridge/transportBridge'
 
 function readyEvent(messageId = 'native-ready'): BridgeEventEnvelope {
@@ -34,6 +35,61 @@ function stateEvent(
     messageId,
     type: 'transport.state',
     payload: state,
+  }
+}
+
+function worldEvent(
+  sequence = 1,
+  overrides: Partial<WorldSnapshot> = {},
+): Extract<BridgeEventEnvelope, { type: 'world.snapshot' }> {
+  return {
+    protocolVersion,
+    messageId: `native-world-${sequence}`,
+    type: 'world.snapshot',
+    payload: {
+      sequence,
+      engineTimeMs: 1250,
+      transport: { playing: true, bpm: 120, bar: 1, beat: 3.5 },
+      phrases: [
+        {
+          id: 'drums',
+          name: 'DRUMS',
+          role: 'rhythm',
+          currentVariantId: 'A',
+          midiChannel: 10,
+          position: { x: 0.78, y: 0.58 },
+          playing: true,
+        },
+        {
+          id: 'bass',
+          name: 'BASS',
+          role: 'bass',
+          currentVariantId: 'A',
+          midiChannel: 1,
+          position: { x: 0.2, y: 0.28 },
+          playing: true,
+        },
+        {
+          id: 'chords',
+          name: 'CHORDS',
+          role: 'harmony',
+          currentVariantId: 'A',
+          midiChannel: 2,
+          position: { x: 0.45, y: 0.76 },
+          playing: true,
+        },
+        {
+          id: 'melody',
+          name: 'MELODY',
+          role: 'lead',
+          currentVariantId: 'A',
+          midiChannel: 3,
+          position: { x: 0.74, y: 0.2 },
+          playing: true,
+        },
+      ],
+      ...overrides,
+    },
   }
 }
 
@@ -135,8 +191,10 @@ describe('Drift bridge interface', () => {
     }
     const bridge = createTransportBridge(backend)
     let received = initialTransportState
+    let receivedWorldSequence = 0
     bridge.subscribe((event) => {
       if (event.type === 'transport.state') received = event.payload
+      if (event.type === 'world.snapshot') receivedWorldSequence = event.payload.sequence
     })
 
     const play = createCommand({ type: 'transport.play', payload: {} })
@@ -149,6 +207,38 @@ describe('Drift bridge interface', () => {
 
     eventListener?.(stateEvent({ ...initialTransportState, bar: 4, beat: 1 }))
     expect(received.bar).toBe(4)
+
+    eventListener?.(worldEvent(5))
+    expect(receivedWorldSequence).toBe(5)
+    const invalidWorld = worldEvent(6)
+    invalidWorld.payload.phrases[1] = {
+      ...invalidWorld.payload.phrases[0],
+      position: { x: 1.5, y: 0.2 },
+    }
+    eventListener?.(invalidWorld)
+    expect(receivedWorldSequence).toBe(5)
+  })
+
+  it('renders four phrases from the latest authoritative world snapshot', () => {
+    const bridge = new FakeTransportBridge()
+    const { container } = render(<App bridge={bridge} />)
+
+    expect(container.querySelectorAll('[data-phrase-id]')).toHaveLength(0)
+    act(() => bridge.publish(worldEvent(4)))
+
+    expect(container.querySelectorAll('[data-phrase-id]')).toHaveLength(4)
+    expect(screen.getByText('DRUMS · A')).toBeTruthy()
+    expect(screen.getByText('BASS · A')).toBeTruthy()
+    expect(screen.getByText('CHORDS · A')).toBeTruthy()
+    expect(screen.getByText('MELODY · A')).toBeTruthy()
+    expect(screen.getByText('4 roles / 4 beats')).toBeTruthy()
+    expect((container.querySelector('[data-phrase-id="bass"]') as HTMLElement).style.left)
+      .toBe('20%')
+
+    act(() => {
+      bridge.publish(worldEvent(3, { phrases: [] }))
+    })
+    expect(container.querySelectorAll('[data-phrase-id]')).toHaveLength(4)
   })
 
   it('selects opaque MIDI IDs and displays structured command rejections', () => {
@@ -203,6 +293,7 @@ describe('Drift bridge interface', () => {
           'native-state-1',
         ),
       )
+      bridge.publish(worldEvent(7))
     })
     expect(screen.getByText('Playing')).toBeTruthy()
     firstLoad.unmount()
@@ -218,11 +309,13 @@ describe('Drift bridge interface', () => {
           'native-state-2',
         ),
       )
+      bridge.publish(worldEvent(8))
     })
     expect(screen.getByText('Native engine linked')).toBeTruthy()
     expect(screen.getByText('Playing')).toBeTruthy()
     expect(screen.getByText('07')).toBeTruthy()
     expect(screen.getByText('3.75')).toBeTruthy()
+    expect(screen.getByText('BASS · A')).toBeTruthy()
   })
 
   it('disables commands outside the native host', () => {

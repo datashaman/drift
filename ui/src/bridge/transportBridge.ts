@@ -16,6 +16,30 @@ export interface EngineDiagnostics {
   bridgeReconnectCount: number
 }
 
+export type PhraseRole = 'rhythm' | 'bass' | 'harmony' | 'lead'
+
+export interface PhraseSnapshot {
+  id: string
+  name: string
+  role: PhraseRole
+  currentVariantId: string
+  midiChannel: number
+  position: { x: number; y: number }
+  playing: boolean
+}
+
+export interface WorldSnapshot {
+  sequence: number
+  engineTimeMs: number
+  transport: {
+    playing: boolean
+    bpm: number
+    bar: number
+    beat: number
+  }
+  phrases: PhraseSnapshot[]
+}
+
 export interface TransportState {
   playing: boolean
   bpm: number
@@ -49,6 +73,13 @@ export const initialTransportState: TransportState = {
   },
 }
 
+export const initialWorldSnapshot: WorldSnapshot = {
+  sequence: 0,
+  engineTimeMs: 0,
+  transport: { playing: false, bpm: 120, bar: 1, beat: 1 },
+  phrases: [],
+}
+
 export type TransportCommand =
   | { type: 'app.connect'; payload: Record<string, never> }
   | { type: 'transport.play'; payload: Record<string, never> }
@@ -79,6 +110,12 @@ export type BridgeEventEnvelope =
       messageId: string
       type: 'transport.state'
       payload: TransportState
+    }
+  | {
+      protocolVersion: typeof protocolVersion
+      messageId: string
+      type: 'world.snapshot'
+      payload: WorldSnapshot
     }
   | {
       protocolVersion: typeof protocolVersion
@@ -122,6 +159,10 @@ function isMessageId(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Za-z0-9._:-]{1,64}$/.test(value)
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
 function isTransportState(payload: unknown): payload is TransportState {
   if (typeof payload !== 'object' || payload === null) return false
 
@@ -159,6 +200,60 @@ function isTransportState(payload: unknown): payload is TransportState {
   )
 }
 
+function isWorldSnapshot(payload: unknown): payload is WorldSnapshot {
+  if (typeof payload !== 'object' || payload === null) return false
+
+  const snapshot = payload as Partial<WorldSnapshot>
+  const transport = snapshot.transport as Partial<WorldSnapshot['transport']> | undefined
+  const validRoles: PhraseRole[] = ['rhythm', 'bass', 'harmony', 'lead']
+
+  if (
+    !Number.isSafeInteger(snapshot.sequence) ||
+    (snapshot.sequence ?? 0) < 1 ||
+    !isFiniteNumber(snapshot.engineTimeMs) ||
+    snapshot.engineTimeMs < 0 ||
+    typeof transport !== 'object' ||
+    transport === null ||
+    typeof transport.playing !== 'boolean' ||
+    !isFiniteNumber(transport.bpm) ||
+    !Number.isSafeInteger(transport.bar) ||
+    !isFiniteNumber(transport.beat) ||
+    !Array.isArray(snapshot.phrases)
+  ) {
+    return false
+  }
+
+  const phraseIds = new Set<string>()
+  return snapshot.phrases.every((phrase) => {
+    if (typeof phrase !== 'object' || phrase === null) return false
+
+    const candidate = phrase as Partial<PhraseSnapshot>
+    const position = candidate.position as Partial<PhraseSnapshot['position']> | undefined
+    const valid =
+      isMessageId(candidate.id) &&
+      typeof candidate.name === 'string' &&
+      candidate.name.length > 0 &&
+      validRoles.includes(candidate.role as PhraseRole) &&
+      isMessageId(candidate.currentVariantId) &&
+      Number.isSafeInteger(candidate.midiChannel) &&
+      (candidate.midiChannel ?? 0) >= 1 &&
+      (candidate.midiChannel ?? 0) <= 16 &&
+      typeof candidate.playing === 'boolean' &&
+      typeof position === 'object' &&
+      position !== null &&
+      isFiniteNumber(position.x) &&
+      isFiniteNumber(position.y) &&
+      position.x >= 0 &&
+      position.x <= 1 &&
+      position.y >= 0 &&
+      position.y <= 1
+
+    if (!valid || phraseIds.has(candidate.id as string)) return false
+    phraseIds.add(candidate.id as string)
+    return true
+  })
+}
+
 function isBridgeEventEnvelope(payload: unknown): payload is BridgeEventEnvelope {
   if (typeof payload !== 'object' || payload === null) return false
 
@@ -182,6 +277,8 @@ function isBridgeEventEnvelope(payload: unknown): payload is BridgeEventEnvelope
   }
 
   if (envelope.type === 'transport.state') return isTransportState(envelope.payload)
+
+  if (envelope.type === 'world.snapshot') return isWorldSnapshot(envelope.payload)
 
   if (envelope.type === 'command.rejected') {
     if (typeof envelope.payload !== 'object' || envelope.payload === null) return false

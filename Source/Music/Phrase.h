@@ -5,6 +5,20 @@
 
 namespace drift::music
 {
+enum class PhraseRole
+{
+    rhythm,
+    bass,
+    harmony,
+    lead,
+};
+
+struct NormalizedPosition
+{
+    double x = 0.5;
+    double y = 0.5;
+};
+
 struct NoteEvent
 {
     double beat = 0.0;
@@ -19,7 +33,12 @@ struct Phrase
     double lengthBeats = 4.0;
     int midiChannel = 1;
     std::vector<NoteEvent> events;
+    std::string name;
+    PhraseRole role = PhraseRole::bass;
+    std::string currentVariantId = "A";
+    NormalizedPosition position;
 };
 
-Phrase makeBassPhrase();
+const char* phraseRoleName (PhraseRole role) noexcept;
+std::vector<Phrase> makeInitialComposition();
 } // namespace drift::music

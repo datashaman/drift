@@ -7,6 +7,8 @@
 #include "Music/Transport.h"
 
 #include <cstddef>
+#include <string>
+#include <vector>
 
 namespace drift::engine
 {
@@ -18,6 +20,17 @@ struct EngineDiagnostics
     std::size_t bridgeReconnectCount = 0;
 };
 
+struct PhraseSnapshot
+{
+    std::string id;
+    std::string name;
+    music::PhraseRole role = music::PhraseRole::bass;
+    std::string currentVariantId;
+    int midiChannel = 1;
+    music::NormalizedPosition position;
+    bool playing = false;
+};
+
 struct EngineSnapshot
 {
     bool playing = false;
@@ -25,7 +38,9 @@ struct EngineSnapshot
     double beatPosition = 0.0;
     int bar = 1;
     double beat = 1.0;
+    double engineTimeSeconds = 0.0;
     std::size_t scheduledEventCount = 0;
+    std::vector<PhraseSnapshot> phrases;
     EngineDiagnostics diagnostics;
 };
 
@@ -51,7 +66,7 @@ private:
     music::MidiSink& sink;
     Clock& clock;
     music::Transport transport;
-    music::Phrase phrase;
+    std::vector<music::Phrase> phrases;
     music::PhraseScheduler scheduler;
     double scheduledThroughBeat = 0.0;
     EngineDiagnostics diagnostics;
