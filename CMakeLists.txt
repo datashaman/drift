@@ -53,6 +53,28 @@ add_custom_command(
 )
 add_custom_target(DriftUIBundle DEPENDS ${DRIFT_UI_OUTPUTS})
 
+add_library(DriftEngine STATIC
+    Source/Engine/Clock.cpp
+    Source/Engine/Clock.h
+    Source/Engine/TransportEngine.cpp
+    Source/Engine/TransportEngine.h
+    Source/Music/MidiSink.cpp
+    Source/Music/MidiSink.h
+    Source/Music/Phrase.cpp
+    Source/Music/Phrase.h
+    Source/Music/PhraseScheduler.cpp
+    Source/Music/PhraseScheduler.h
+    Source/Music/Quantizer.cpp
+    Source/Music/Quantizer.h
+    Source/Music/Transport.cpp
+    Source/Music/Transport.h
+)
+target_include_directories(DriftEngine PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/Source")
+target_link_libraries(DriftEngine PRIVATE
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_warning_flags
+)
+
 juce_add_gui_app(Drift
     PRODUCT_NAME "Drift"
     COMPANY_NAME "datashaman"
@@ -60,6 +82,8 @@ juce_add_gui_app(Drift
     VERSION "${PROJECT_VERSION}"
 )
 target_sources(Drift PRIVATE
+    Source/Engine/EngineController.cpp
+    Source/Engine/EngineController.h
     Source/App/Main.cpp
     Source/App/MainComponent.cpp
     Source/App/MainComponent.h
@@ -73,6 +97,7 @@ target_compile_definitions(Drift PRIVATE
 )
 target_link_libraries(Drift
     PRIVATE
+        DriftEngine
         juce::juce_gui_extra
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
@@ -92,7 +117,7 @@ add_custom_command(TARGET Drift POST_BUILD
 
 if(BUILD_TESTING)
     add_executable(DriftTests
-        Tests/UiResourceProviderTests.cpp
+        Tests/DriftTests.cpp
         Source/UI/UiResourceProvider.cpp
         Source/UI/UiResourceProvider.h
     )
@@ -104,6 +129,7 @@ if(BUILD_TESTING)
     )
     target_link_libraries(DriftTests
         PRIVATE
+            DriftEngine
             juce::juce_gui_extra
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags

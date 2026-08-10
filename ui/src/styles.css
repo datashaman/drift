@@ -51,6 +51,65 @@ body {
   padding: 0 2px;
 }
 
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.transport-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 94px;
+  padding: 11px 15px;
+  border: 1px solid rgba(110, 208, 196, 0.55);
+  border-radius: 999px;
+  color: var(--deep);
+  background: var(--aqua);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.transport-button:disabled,
+.tempo-control input:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.transport-button:focus-visible,
+.tempo-control input:focus-visible {
+  outline: 2px solid var(--sun);
+  outline-offset: 3px;
+}
+
+.tempo-control {
+  display: grid;
+  grid-template-columns: auto 58px auto;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tempo-control input {
+  width: 58px;
+  padding: 8px 6px;
+  border: 0;
+  border-bottom: 1px solid rgba(238, 241, 232, 0.35);
+  border-radius: 0;
+  color: var(--ink);
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  text-align: center;
+}
+
 .eyebrow,
 .build-tag,
 .status,
@@ -114,6 +173,15 @@ h1 {
   letter-spacing: 0.11em;
   filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.26));
   animation: drift 8s ease-in-out infinite alternate;
+  animation-play-state: paused;
+}
+
+.is-playing .phrase--active {
+  animation-play-state: running;
+}
+
+.phrase--queued {
+  opacity: 0.28;
 }
 
 .phrase-core {
@@ -217,7 +285,29 @@ h1 {
 }
 
 .status dl {
-  margin: 42px 0 28px;
+  margin: 28px 0;
+}
+
+.musical-position {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 1px 12px;
+  margin-top: 34px;
+}
+
+.musical-position span {
+  color: rgba(158, 169, 191, 0.7);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+}
+
+.musical-position strong {
+  color: var(--ink);
+  font-family: "Avenir Next", Avenir, "Helvetica Neue", sans-serif;
+  font-size: 30px;
+  font-weight: 400;
+  letter-spacing: -0.04em;
 }
 
 .status dl div {
@@ -274,6 +364,13 @@ h1 {
 
   .masthead {
     grid-column: 1;
+    align-items: flex-start;
+    gap: 20px;
+  }
+
+  .transport {
+    align-items: flex-end;
+    flex-direction: column;
   }
 
   .status {
