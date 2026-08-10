@@ -70,6 +70,8 @@ public:
     bool moveDraggedPhrase (const std::string& phraseId,
                             music::NormalizedPosition position);
     bool endPhraseDrag (const std::string& phraseId);
+    bool throwPhrase (const std::string& phraseId,
+                      music::NormalizedVelocity velocity);
     void endAllPhraseDrags();
     bool containsPhrase (const std::string& phraseId) const noexcept;
 

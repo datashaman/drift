@@ -101,6 +101,34 @@ bool SpatialWorld::endDrag (const std::string& phraseId)
     return true;
 }
 
+bool SpatialWorld::throwPhrase (const std::string& phraseId,
+                                music::NormalizedVelocity velocity)
+{
+    auto* body = findBody (phraseId);
+    if (body == nullptr || ! body->dragged
+        || ! std::isfinite (velocity.x) || ! std::isfinite (velocity.y))
+    {
+        return false;
+    }
+
+    const auto speed = std::hypot (velocity.x, velocity.y);
+    if (speed < stationaryVelocityThreshold)
+    {
+        velocity = {};
+    }
+    else if (speed > maximumThrowSpeed)
+    {
+        const auto scale = maximumThrowSpeed / speed;
+        velocity.x *= scale;
+        velocity.y *= scale;
+    }
+
+    body->velocity = velocity;
+    body->dragged = false;
+    ++worldRevision;
+    return true;
+}
+
 void SpatialWorld::endAllDrags()
 {
     for (auto& body : phraseBodies)

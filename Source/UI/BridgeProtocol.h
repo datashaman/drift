@@ -21,6 +21,7 @@ enum class BridgeCommandType
     phraseDragStart,
     phraseMove,
     phraseDragEnd,
+    phraseThrow,
 };
 
 enum class CommandRejectionCode
@@ -45,8 +46,11 @@ struct ValidatedBridgeCommand
     double bpm = 120.0;
     std::string outputId;
     std::string phraseId;
+    std::string dragSessionId;
     double positionX = 0.5;
     double positionY = 0.5;
+    double velocityX = 0.0;
+    double velocityY = 0.0;
 };
 
 struct CommandRejection
@@ -73,6 +77,7 @@ struct CommandHandlers
     std::function<void (const std::string&)> onPhraseDragStart;
     std::function<void (const std::string&, double, double)> onPhraseMove;
     std::function<void (const std::string&)> onPhraseDragEnd;
+    std::function<void (const std::string&, double, double)> onPhraseThrow;
     std::function<bool (const std::string&)> phraseIdExists;
 };
 

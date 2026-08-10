@@ -2,8 +2,12 @@ import { describe, expect, it } from 'vitest'
 
 import type { PhraseSnapshot, WorldSnapshot } from './bridge/transportBridge'
 import {
+  appendPointerSample,
   clampPositionForPhrase,
+  estimateReleaseVelocity,
   findPhraseAtPosition,
+  maximumPointerSamples,
+  maximumThrowSpeed,
   normalisePointerPosition,
   shouldClearOptimisticDrag,
 } from './dragInteraction'
@@ -85,5 +89,46 @@ describe('phrase drag interaction', () => {
     }
     expect(shouldClearOptimisticDrag(releasedDrag, snapshot(12, true))).toBe(false)
     expect(shouldClearOptimisticDrag(releasedDrag, snapshot(13, false))).toBe(true)
+  })
+
+  it('keeps only a bounded recent pointer sample window', () => {
+    let samples = [{ position: { x: 0, y: 0 }, timeMs: 0 }]
+    for (let index = 1; index <= 12; index += 1) {
+      samples = appendPointerSample(samples, {
+        position: { x: index / 20, y: 0.5 },
+        timeMs: index * 20,
+      })
+    }
+
+    expect(samples.length).toBeLessThanOrEqual(maximumPointerSamples)
+    expect(samples[0].timeMs).toBe(120)
+    expect(samples.at(-1)?.timeMs).toBe(240)
+  })
+
+  it('derives stationary, slow, fast, and clamped release velocities', () => {
+    expect(estimateReleaseVelocity([
+      { position: { x: 0.5, y: 0.5 }, timeMs: 0 },
+      { position: { x: 0.5001, y: 0.5 }, timeMs: 100 },
+    ])).toEqual({ x: 0, y: 0 })
+
+    const slow = estimateReleaseVelocity([
+      { position: { x: 0.2, y: 0.4 }, timeMs: 0 },
+      { position: { x: 0.22, y: 0.4 }, timeMs: 100 },
+    ])
+    const fast = estimateReleaseVelocity([
+      { position: { x: 0.2, y: 0.4 }, timeMs: 0 },
+      { position: { x: 0.28, y: 0.4 }, timeMs: 100 },
+    ])
+    expect(fast.x).toBeGreaterThan(slow.x)
+
+    const clamped = estimateReleaseVelocity([
+      { position: { x: 0, y: 0 }, timeMs: 0 },
+      { position: { x: 1, y: 1 }, timeMs: 10 },
+    ])
+    expect(Math.hypot(clamped.x, clamped.y)).toBeCloseTo(maximumThrowSpeed)
+    expect(estimateReleaseVelocity([
+      { position: { x: 0, y: 0 }, timeMs: 10 },
+      { position: { x: 1, y: 1 }, timeMs: 10 },
+    ])).toEqual({ x: 0, y: 0 })
   })
 })

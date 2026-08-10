@@ -72,7 +72,8 @@ void MainComponent::handleCommand (juce::var command)
     const auto isPhraseCommand
         = validated.type == drift::ui::BridgeCommandType::phraseDragStart
           || validated.type == drift::ui::BridgeCommandType::phraseMove
-          || validated.type == drift::ui::BridgeCommandType::phraseDragEnd;
+          || validated.type == drift::ui::BridgeCommandType::phraseDragEnd
+          || validated.type == drift::ui::BridgeCommandType::phraseThrow;
     if (isPhraseCommand && ! engine.containsPhrase (validated.phraseId))
     {
         publishRejection ({ validated.messageId,
@@ -84,9 +85,11 @@ void MainComponent::handleCommand (juce::var command)
     drift::engine::EngineCommand engineCommand;
     engineCommand.messageId = validated.messageId;
     engineCommand.phraseId = validated.phraseId;
+    engineCommand.dragSessionId = validated.dragSessionId;
     engineCommand.outputId = validated.outputId;
     engineCommand.bpm = validated.bpm;
     engineCommand.position = { validated.positionX, validated.positionY };
+    engineCommand.velocity = { validated.velocityX, validated.velocityY };
 
     switch (validated.type)
     {
@@ -113,6 +116,9 @@ void MainComponent::handleCommand (juce::var command)
             break;
         case drift::ui::BridgeCommandType::phraseDragEnd:
             engineCommand.type = drift::engine::EngineCommandType::phraseDragEnd;
+            break;
+        case drift::ui::BridgeCommandType::phraseThrow:
+            engineCommand.type = drift::engine::EngineCommandType::phraseThrow;
             break;
     }
 

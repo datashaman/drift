@@ -131,6 +131,9 @@ void EngineController::applyCommand (const EngineCommand& command)
         case EngineCommandType::phraseDragEnd:
             engine.endPhraseDrag (command.phraseId);
             break;
+        case EngineCommandType::phraseThrow:
+            engine.throwPhrase (command.phraseId, command.velocity);
+            break;
     }
 }
 } // namespace drift::engine

@@ -141,22 +141,28 @@ export function App({ bridge }: AppProps) {
         <div className="relationship relationship--two" aria-hidden="true" />
 
         <PhraseWorld
-          onDragEnd={(phraseId) =>
+          onDragEnd={(phraseId, dragSessionId) =>
             transportBridge.send(createCommand({
               type: 'phrase.dragEnd',
-              payload: { phraseId },
+              payload: { phraseId, dragSessionId },
             }))
           }
-          onDragMove={(phraseId, position) =>
+          onDragMove={(phraseId, dragSessionId, position) =>
             transportBridge.send(createCommand({
               type: 'phrase.move',
-              payload: { phraseId, position },
+              payload: { phraseId, dragSessionId, position },
             }))
           }
-          onDragStart={(phraseId) =>
+          onDragStart={(phraseId, dragSessionId) =>
             transportBridge.send(createCommand({
               type: 'phrase.dragStart',
-              payload: { phraseId },
+              payload: { phraseId, dragSessionId },
+            }))
+          }
+          onThrow={(phraseId, dragSessionId, velocity) =>
+            transportBridge.send(createCommand({
+              type: 'phrase.throw',
+              payload: { phraseId, dragSessionId, velocity },
             }))
           }
           snapshot={worldSnapshot}

@@ -1,5 +1,6 @@
 #include "UI/BridgeProtocol.h"
 
+#include "Engine/SpatialWorld.h"
 #include "Music/Transport.h"
 
 #include <cmath>
@@ -44,6 +45,7 @@ std::optional<BridgeCommandType> commandTypeForName (const juce::String& type)
     if (type == "phrase.dragStart") return BridgeCommandType::phraseDragStart;
     if (type == "phrase.move") return BridgeCommandType::phraseMove;
     if (type == "phrase.dragEnd") return BridgeCommandType::phraseDragEnd;
+    if (type == "phrase.throw") return BridgeCommandType::phraseThrow;
     return std::nullopt;
 }
 } // namespace
@@ -125,7 +127,8 @@ CommandDispatchResult validateCommandEnvelope (const juce::var& envelope)
     }
     else if (*commandType == BridgeCommandType::phraseDragStart
              || *commandType == BridgeCommandType::phraseMove
-             || *commandType == BridgeCommandType::phraseDragEnd)
+             || *commandType == BridgeCommandType::phraseDragEnd
+             || *commandType == BridgeCommandType::phraseThrow)
     {
         const auto phraseId = payloadObject->getProperty ("phraseId");
         if (! phraseId.isString() || ! isValidMessageId (phraseId.toString()))
@@ -133,6 +136,12 @@ CommandDispatchResult validateCommandEnvelope (const juce::var& envelope)
                            "The phrase payload requires a stable phraseId");
 
         command.phraseId = phraseId.toString().toStdString();
+        const auto dragSessionId = payloadObject->getProperty ("dragSessionId");
+        if (! dragSessionId.isString() || ! isValidMessageId (dragSessionId.toString()))
+            return reject (command.messageId, CommandRejectionCode::invalidPayload,
+                           "The phrase payload requires a stable dragSessionId");
+
+        command.dragSessionId = dragSessionId.toString().toStdString();
 
         if (*commandType == BridgeCommandType::phraseMove)
         {
@@ -157,6 +166,31 @@ CommandDispatchResult validateCommandEnvelope (const juce::var& envelope)
             {
                 return reject (command.messageId, CommandRejectionCode::outOfRange,
                                "Phrase coordinates must be normalized between 0 and 1");
+            }
+        }
+        else if (*commandType == BridgeCommandType::phraseThrow)
+        {
+            const auto* velocity = payloadObject->getProperty ("velocity").getDynamicObject();
+            if (velocity == nullptr)
+                return reject (command.messageId, CommandRejectionCode::invalidPayload,
+                               "The throw payload requires a velocity object");
+
+            const auto x = velocity->getProperty ("x");
+            const auto y = velocity->getProperty ("y");
+            const auto xIsNumeric = x.isInt() || x.isInt64() || x.isDouble();
+            const auto yIsNumeric = y.isInt() || y.isInt64() || y.isDouble();
+            if (! xIsNumeric || ! yIsNumeric)
+                return reject (command.messageId, CommandRejectionCode::invalidPayload,
+                               "The throw velocity requires numeric x and y components");
+
+            command.velocityX = static_cast<double> (x);
+            command.velocityY = static_cast<double> (y);
+            const auto speed = std::hypot (command.velocityX, command.velocityY);
+            if (! std::isfinite (speed)
+                || speed > engine::SpatialWorld::maximumThrowSpeed + 1.0e-9)
+            {
+                return reject (command.messageId, CommandRejectionCode::outOfRange,
+                               "The throw velocity exceeds the safe normalized speed");
             }
         }
     }
@@ -185,7 +219,8 @@ CommandDispatchResult dispatchCommandEnvelope (const juce::var& envelope,
 
     const auto isPhraseCommand = command.type == BridgeCommandType::phraseDragStart
                                  || command.type == BridgeCommandType::phraseMove
-                                 || command.type == BridgeCommandType::phraseDragEnd;
+                                 || command.type == BridgeCommandType::phraseDragEnd
+                                 || command.type == BridgeCommandType::phraseThrow;
     if (isPhraseCommand && handlers.phraseIdExists
         && ! handlers.phraseIdExists (command.phraseId))
     {
@@ -219,6 +254,11 @@ CommandDispatchResult dispatchCommandEnvelope (const juce::var& envelope,
             break;
         case BridgeCommandType::phraseDragEnd:
             if (handlers.onPhraseDragEnd) handlers.onPhraseDragEnd (command.phraseId);
+            break;
+        case BridgeCommandType::phraseThrow:
+            if (handlers.onPhraseThrow)
+                handlers.onPhraseThrow (
+                    command.phraseId, command.velocityX, command.velocityY);
             break;
     }
 

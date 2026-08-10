@@ -14,6 +14,7 @@
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <set>
 #include <string>
@@ -192,21 +193,42 @@ juce::var makeOutputPayload (const juce::String& outputId)
     return juce::var { object };
 }
 
-juce::var makePhrasePayload (const juce::String& phraseId)
+juce::var makePhrasePayload (const juce::String& phraseId,
+                             const juce::String& dragSessionId = "drag-1")
 {
     auto* object = new juce::DynamicObject();
     object->setProperty ("phraseId", phraseId);
+    object->setProperty ("dragSessionId", dragSessionId);
     return juce::var { object };
 }
 
-juce::var makeMovePayload (const juce::String& phraseId, double x, double y)
+juce::var makeMovePayload (const juce::String& phraseId,
+                           double x,
+                           double y,
+                           const juce::String& dragSessionId = "drag-1")
 {
     auto* position = new juce::DynamicObject();
     position->setProperty ("x", x);
     position->setProperty ("y", y);
     auto* object = new juce::DynamicObject();
     object->setProperty ("phraseId", phraseId);
+    object->setProperty ("dragSessionId", dragSessionId);
     object->setProperty ("position", juce::var { position });
+    return juce::var { object };
+}
+
+juce::var makeThrowPayload (const juce::String& phraseId,
+                            double x,
+                            double y,
+                            const juce::String& dragSessionId = "drag-1")
+{
+    auto* velocity = new juce::DynamicObject();
+    velocity->setProperty ("x", x);
+    velocity->setProperty ("y", y);
+    auto* object = new juce::DynamicObject();
+    object->setProperty ("phraseId", phraseId);
+    object->setProperty ("dragSessionId", dragSessionId);
+    object->setProperty ("velocity", juce::var { velocity });
     return juce::var { object };
 }
 
@@ -454,6 +476,76 @@ void testSpatialWorldDragLifecycle()
             "A reconnect can release every abandoned native drag");
 }
 
+void testSpatialWorldThrowLifecycle()
+{
+    using drift::engine::PhraseBody;
+    using drift::engine::SpatialWorld;
+
+    SpatialWorld stationaryWorld {
+        { PhraseBody { "stationary", { 0.5, 0.5 }, { 0.2, 0.1 }, 0.05, 1.0 } },
+        0.0,
+    };
+    expect (stationaryWorld.beginDrag ("stationary"), "A stationary throw can begin");
+    expect (stationaryWorld.throwPhrase ("stationary", { 0.001, -0.001 }),
+            "A finite stationary release ends its drag");
+    expectNear (stationaryWorld.bodies().front().velocity.x, 0.0,
+                "Negligible horizontal release velocity is suppressed");
+    expectNear (stationaryWorld.bodies().front().velocity.y, 0.0,
+                "Negligible vertical release velocity is suppressed");
+    stationaryWorld.advanceTo (SpatialWorld::fixedStepSeconds);
+    expectNear (stationaryWorld.bodies().front().position.x, 0.5,
+                "A stationary release does not drift after release");
+
+    SpatialWorld slowWorld {
+        { PhraseBody { "slow", { 0.5, 0.5 }, {}, 0.05, 1.0 } },
+        0.0,
+    };
+    SpatialWorld fastWorld {
+        { PhraseBody { "fast", { 0.5, 0.5 }, {}, 0.05, 1.0 } },
+        0.0,
+    };
+    slowWorld.beginDrag ("slow");
+    fastWorld.beginDrag ("fast");
+    expect (slowWorld.throwPhrase ("slow", { 0.2, 0.0 }), "A slow throw is accepted");
+    expect (fastWorld.throwPhrase ("fast", { 0.8, 0.0 }), "A fast throw is accepted");
+    slowWorld.advanceTo (SpatialWorld::fixedStepSeconds);
+    fastWorld.advanceTo (SpatialWorld::fixedStepSeconds);
+    expect (fastWorld.bodies().front().position.x > slowWorld.bodies().front().position.x,
+            "A faster release visibly travels farther in the same fixed step");
+
+    SpatialWorld clampedWorld {
+        { PhraseBody { "clamped", { 0.5, 0.5 }, {}, 0.05, 1.0 } },
+        0.0,
+    };
+    clampedWorld.beginDrag ("clamped");
+    expect (clampedWorld.throwPhrase ("clamped", { 30.0, 40.0 }),
+            "Native authority safely accepts an excessive direct velocity");
+    expectNear (std::hypot (clampedWorld.bodies().front().velocity.x,
+                            clampedWorld.bodies().front().velocity.y),
+                SpatialWorld::maximumThrowSpeed,
+                "Native authority clamps excessive throw magnitude");
+
+    SpatialWorld edgeWorld {
+        { PhraseBody { "corner", { 0.0501, 0.0501 }, {}, 0.05, 1.0 } },
+        0.0,
+    };
+    edgeWorld.beginDrag ("corner");
+    edgeWorld.throwPhrase ("corner", { -1.0, -1.0 });
+    edgeWorld.advanceTo (SpatialWorld::fixedStepSeconds);
+    const auto& corner = edgeWorld.bodies().front();
+    expect (corner.velocity.x > 0.0 && corner.velocity.y > 0.0,
+            "A thrown phrase reflects both axes at a corner");
+    expect (corner.position.x >= corner.radius && corner.position.y >= corner.radius,
+            "A corner throw remains inside normalized bounds");
+
+    edgeWorld.beginDrag ("corner");
+    expect (! edgeWorld.throwPhrase (
+                "corner", { std::numeric_limits<double>::infinity(), 0.0 }),
+            "Non-finite native velocity is rejected");
+    expect (edgeWorld.bodies().front().dragged,
+            "A rejected throw does not interrupt the active drag");
+}
+
 void testEngineCommandQueueCoalescingAndPressure()
 {
     using drift::engine::CommandEnqueueResult;
@@ -463,11 +555,13 @@ void testEngineCommandQueueCoalescingAndPressure()
 
     const auto makeEngineCommand = [] (EngineCommandType type,
                                        std::string messageId,
-                                       std::string phraseId = {}) {
+                                       std::string phraseId = {},
+                                       std::string dragSessionId = "drag-1") {
         EngineCommand command;
         command.type = type;
         command.messageId = std::move (messageId);
         command.phraseId = std::move (phraseId);
+        command.dragSessionId = std::move (dragSessionId);
         return command;
     };
 
@@ -499,6 +593,10 @@ void testEngineCommandQueueCoalescingAndPressure()
             "Moves for different phrases can coexist");
     expect (queue.tryEnqueue (latestBassMove) == CommandEnqueueResult::coalesced,
             "A stale move coalesces by phrase across other move commands");
+    expect (queue.tryEnqueue (makeEngineCommand (
+                EngineCommandType::phraseMove, "wrong-session", "bass", "drag-old"))
+                == CommandEnqueueResult::staleDrag,
+            "A move from an obsolete drag session is rejected");
     expect (queue.tryEnqueue (makeEngineCommand (EngineCommandType::transportPlay, "play"))
                 == CommandEnqueueResult::accepted,
             "A transport command remains an ordered discrete barrier");
@@ -520,6 +618,19 @@ void testEngineCommandQueueCoalescingAndPressure()
             "Discrete ordering is retained around later movement");
     expect (queue.diagnostics().coalescedMoveCount == 1,
             "Move coalescing is observable in queue diagnostics");
+
+    EngineCommandQueue throwQueue;
+    throwQueue.tryEnqueue (makeEngineCommand (
+        EngineCommandType::phraseDragStart, "start", "bass", "throw-session"));
+    auto throwCommand = makeEngineCommand (
+        EngineCommandType::phraseThrow, "throw", "bass", "throw-session");
+    throwCommand.velocity = { 0.7, -0.2 };
+    expect (throwQueue.tryEnqueue (throwCommand) == CommandEnqueueResult::accepted,
+            "A throw matching the active drag session is accepted");
+    expect (throwQueue.tryEnqueue (makeEngineCommand (
+                EngineCommandType::phraseMove, "after-throw", "bass", "throw-session"))
+                == CommandEnqueueResult::staleDrag,
+            "An accepted throw closes the intended pointer lifecycle");
 
     EngineCommandQueue pressureQueue { 2 };
     expect (pressureQueue.tryEnqueue (
@@ -566,9 +677,9 @@ void testEngineCommandQueueCoalescingAndPressure()
             EngineCommandType::transportPlay, "play-" + std::to_string (index)));
     }
     expect (evictionQueue.tryEnqueue (makeEngineCommand (
-                EngineCommandType::phraseDragEnd, "end", "bass"))
+                EngineCommandType::phraseThrow, "throw", "bass"))
                 == CommandEnqueueResult::accepted,
-            "A full queue evicts stale movement rather than dropping drag end");
+            "A full queue evicts stale movement rather than dropping a throw");
 
     EngineCommandQueue reconnectQueue;
     reconnectQueue.tryEnqueue (makeEngineCommand (
@@ -830,6 +941,7 @@ void testBridgeRejectsInvalidCommandsBeforeMutation()
         {},
         {},
         {},
+        {},
         [] (const std::string& phraseId) { return phraseId == "bass"; },
     };
 
@@ -877,6 +989,29 @@ void testBridgeRejectsInvalidCommandsBeforeMutation()
             "ui-position", "phrase.move", makeMovePayload ("bass", 1.1, 0.5)),
         drift::ui::CommandRejectionCode::outOfRange,
         "An out-of-range normalized position is rejected");
+    expectRejected (
+        makeCommandEnvelope (
+            "ui-throw-unknown", "phrase.throw", makeThrowPayload ("unknown", 0.2, 0.1)),
+        drift::ui::CommandRejectionCode::unknownId,
+        "A throw for an unknown phrase is rejected");
+    expectRejected (
+        makeCommandEnvelope (
+            "ui-throw-fast", "phrase.throw", makeThrowPayload ("bass", 2.0, 0.0)),
+        drift::ui::CommandRejectionCode::outOfRange,
+        "An unsafe throw velocity is rejected before native mutation");
+    expectRejected (
+        makeCommandEnvelope (
+            "ui-throw-finite", "phrase.throw",
+            makeThrowPayload ("bass", std::numeric_limits<double>::infinity(), 0.0)),
+        drift::ui::CommandRejectionCode::outOfRange,
+        "A non-finite throw velocity is rejected before native mutation");
+
+    auto missingSession = makeThrowPayload ("bass", 0.2, 0.1);
+    missingSession.getDynamicObject()->removeProperty ("dragSessionId");
+    expectRejected (
+        makeCommandEnvelope ("ui-throw-session", "phrase.throw", std::move (missingSession)),
+        drift::ui::CommandRejectionCode::invalidPayload,
+        "A throw without a stable drag session is malformed");
 
     const auto validMove = drift::ui::validateCommandEnvelope (
         makeCommandEnvelope (
@@ -890,6 +1025,21 @@ void testBridgeRejectsInvalidCommandsBeforeMutation()
                     "A validated move retains normalized x");
         expectNear (validMove.command->positionY, 0.75,
                     "A validated move retains normalized y");
+    }
+
+    const auto validThrow = drift::ui::validateCommandEnvelope (
+        makeCommandEnvelope (
+            "ui-valid-throw", "phrase.throw", makeThrowPayload ("bass", 0.6, -0.4)));
+    expect (validThrow.command.has_value(), "A bounded phrase throw is accepted");
+    if (validThrow.command)
+    {
+        expect (validThrow.command->phraseId == "bass"
+                    && validThrow.command->dragSessionId == "drag-1",
+                "A validated throw retains stable phrase and drag IDs");
+        expectNear (validThrow.command->velocityX, 0.6,
+                    "A validated throw retains normalized horizontal velocity");
+        expectNear (validThrow.command->velocityY, -0.4,
+                    "A validated throw retains normalized vertical velocity");
     }
 
     auto oversizedPayload = makeObject();
@@ -924,6 +1074,7 @@ void testBridgeReconnectPreservesNativePlayback()
         [&engine] { engine.play(); },
         [&engine] { engine.stop(); },
         [&engine] (double bpm) { engine.setBpm (bpm); },
+        {},
         {},
         {},
         {},
@@ -986,6 +1137,7 @@ int main()
     testSpatialWorldFixedStepAndBoundaries();
     testSpatialWorldBoundsCatchUpWork();
     testSpatialWorldDragLifecycle();
+    testSpatialWorldThrowLifecycle();
     testEngineCommandQueueCoalescingAndPressure();
     testFourPhrasesShareOneTransport();
     testEngineIsIndependentOfUiUpdateTiming();
