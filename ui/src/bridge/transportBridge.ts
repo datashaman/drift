@@ -14,6 +14,9 @@ export interface EngineDiagnostics {
   lateMidiEventCount: number
   maximumEngineLatenessMs: number
   bridgeReconnectCount: number
+  physicsStepCount: number
+  physicsCatchUpStepCount: number
+  physicsCatchUpLimitHitCount: number
 }
 
 export type PhraseRole = 'rhythm' | 'bass' | 'harmony' | 'lead'
@@ -25,7 +28,18 @@ export interface PhraseSnapshot {
   currentVariantId: string
   midiChannel: number
   position: { x: number; y: number }
+  velocity: { x: number; y: number }
+  radius: number
+  mass: number
   playing: boolean
+}
+
+export interface WorldDiagnostics {
+  physicsStepCount: number
+  physicsCatchUpStepCount: number
+  physicsCatchUpLimitHitCount: number
+  droppedSnapshotCount: number
+  maximumSnapshotIntervalMs: number
 }
 
 export interface WorldSnapshot {
@@ -38,6 +52,7 @@ export interface WorldSnapshot {
     beat: number
   }
   phrases: PhraseSnapshot[]
+  diagnostics: WorldDiagnostics
 }
 
 export interface TransportState {
@@ -70,6 +85,9 @@ export const initialTransportState: TransportState = {
     lateMidiEventCount: 0,
     maximumEngineLatenessMs: 0,
     bridgeReconnectCount: 0,
+    physicsStepCount: 0,
+    physicsCatchUpStepCount: 0,
+    physicsCatchUpLimitHitCount: 0,
   },
 }
 
@@ -78,6 +96,13 @@ export const initialWorldSnapshot: WorldSnapshot = {
   engineTimeMs: 0,
   transport: { playing: false, bpm: 120, bar: 1, beat: 1 },
   phrases: [],
+  diagnostics: {
+    physicsStepCount: 0,
+    physicsCatchUpStepCount: 0,
+    physicsCatchUpLimitHitCount: 0,
+    droppedSnapshotCount: 0,
+    maximumSnapshotIntervalMs: 0,
+  },
 }
 
 export type TransportCommand =
@@ -196,7 +221,10 @@ function isTransportState(payload: unknown): payload is TransportState {
     typeof diagnostics.schedulingWatermarkBeat === 'number' &&
     typeof diagnostics.lateMidiEventCount === 'number' &&
     typeof diagnostics.maximumEngineLatenessMs === 'number' &&
-    typeof diagnostics.bridgeReconnectCount === 'number'
+    typeof diagnostics.bridgeReconnectCount === 'number' &&
+    typeof diagnostics.physicsStepCount === 'number' &&
+    typeof diagnostics.physicsCatchUpStepCount === 'number' &&
+    typeof diagnostics.physicsCatchUpLimitHitCount === 'number'
   )
 }
 
@@ -205,6 +233,7 @@ function isWorldSnapshot(payload: unknown): payload is WorldSnapshot {
 
   const snapshot = payload as Partial<WorldSnapshot>
   const transport = snapshot.transport as Partial<WorldSnapshot['transport']> | undefined
+  const diagnostics = snapshot.diagnostics as Partial<WorldDiagnostics> | undefined
   const validRoles: PhraseRole[] = ['rhythm', 'bass', 'harmony', 'lead']
 
   if (
@@ -218,7 +247,19 @@ function isWorldSnapshot(payload: unknown): payload is WorldSnapshot {
     !isFiniteNumber(transport.bpm) ||
     !Number.isSafeInteger(transport.bar) ||
     !isFiniteNumber(transport.beat) ||
-    !Array.isArray(snapshot.phrases)
+    !Array.isArray(snapshot.phrases) ||
+    typeof diagnostics !== 'object' ||
+    diagnostics === null ||
+    !Number.isSafeInteger(diagnostics.physicsStepCount) ||
+    (diagnostics.physicsStepCount ?? -1) < 0 ||
+    !Number.isSafeInteger(diagnostics.physicsCatchUpStepCount) ||
+    (diagnostics.physicsCatchUpStepCount ?? -1) < 0 ||
+    !Number.isSafeInteger(diagnostics.physicsCatchUpLimitHitCount) ||
+    (diagnostics.physicsCatchUpLimitHitCount ?? -1) < 0 ||
+    !Number.isSafeInteger(diagnostics.droppedSnapshotCount) ||
+    (diagnostics.droppedSnapshotCount ?? -1) < 0 ||
+    !isFiniteNumber(diagnostics.maximumSnapshotIntervalMs) ||
+    diagnostics.maximumSnapshotIntervalMs < 0
   ) {
     return false
   }
@@ -229,6 +270,7 @@ function isWorldSnapshot(payload: unknown): payload is WorldSnapshot {
 
     const candidate = phrase as Partial<PhraseSnapshot>
     const position = candidate.position as Partial<PhraseSnapshot['position']> | undefined
+    const velocity = candidate.velocity as Partial<PhraseSnapshot['velocity']> | undefined
     const valid =
       isMessageId(candidate.id) &&
       typeof candidate.name === 'string' &&
@@ -246,7 +288,20 @@ function isWorldSnapshot(payload: unknown): payload is WorldSnapshot {
       position.x >= 0 &&
       position.x <= 1 &&
       position.y >= 0 &&
-      position.y <= 1
+      position.y <= 1 &&
+      typeof velocity === 'object' &&
+      velocity !== null &&
+      isFiniteNumber(velocity.x) &&
+      isFiniteNumber(velocity.y) &&
+      isFiniteNumber(candidate.radius) &&
+      candidate.radius > 0 &&
+      candidate.radius <= 0.5 &&
+      position.x >= candidate.radius &&
+      position.x <= 1 - candidate.radius &&
+      position.y >= candidate.radius &&
+      position.y <= 1 - candidate.radius &&
+      isFiniteNumber(candidate.mass) &&
+      candidate.mass > 0
 
     if (!valid || phraseIds.has(candidate.id as string)) return false
     phraseIds.add(candidate.id as string)

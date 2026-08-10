@@ -19,6 +19,12 @@ struct NormalizedPosition
     double y = 0.5;
 };
 
+struct NormalizedVelocity
+{
+    double x = 0.0;
+    double y = 0.0;
+};
+
 struct NoteEvent
 {
     double beat = 0.0;
@@ -37,6 +43,9 @@ struct Phrase
     PhraseRole role = PhraseRole::bass;
     std::string currentVariantId = "A";
     NormalizedPosition position;
+    NormalizedVelocity velocity;
+    double radius = 0.045;
+    double mass = 1.0;
 };
 
 const char* phraseRoleName (PhraseRole role) noexcept;

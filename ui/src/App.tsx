@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
+import { PhraseWorld } from './PhraseWorld'
+
 import {
   createCommand,
   createTransportBridge,
@@ -138,20 +140,7 @@ export function App({ bridge }: AppProps) {
         <div className="relationship relationship--one" aria-hidden="true" />
         <div className="relationship relationship--two" aria-hidden="true" />
 
-        {worldSnapshot.phrases.map((phrase) => (
-          <div
-            className={`phrase phrase--${phrase.id} ${phrase.playing ? 'phrase--active' : 'phrase--stopped'}`}
-            data-phrase-id={phrase.id}
-            key={phrase.id}
-            style={{
-              left: `${phrase.position.x * 100}%`,
-              top: `${phrase.position.y * 100}%`,
-            }}
-          >
-            <span className="phrase-core" aria-hidden="true" />
-            <span>{phrase.name} · {phrase.currentVariantId}</span>
-          </div>
-        ))}
+        <PhraseWorld snapshot={worldSnapshot} />
 
         <p className="field-note">
           {worldSnapshot.phrases.length === 0
@@ -213,6 +202,24 @@ export function App({ bridge }: AppProps) {
           <div>
             <dt>Reconnects</dt>
             <dd>{transport.diagnostics.bridgeReconnectCount}</dd>
+          </div>
+          <div>
+            <dt>Physics</dt>
+            <dd>{worldSnapshot.diagnostics.physicsStepCount} steps</dd>
+          </div>
+          <div>
+            <dt>Catch-up</dt>
+            <dd>
+              {worldSnapshot.diagnostics.physicsCatchUpStepCount} / {worldSnapshot.diagnostics.physicsCatchUpLimitHitCount} caps
+            </dd>
+          </div>
+          <div>
+            <dt>Dropped</dt>
+            <dd>{worldSnapshot.diagnostics.droppedSnapshotCount} snapshots</dd>
+          </div>
+          <div>
+            <dt>Snapshot max</dt>
+            <dd>{worldSnapshot.diagnostics.maximumSnapshotIntervalMs.toFixed(1)} ms</dd>
           </div>
         </dl>
 

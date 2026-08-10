@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Clock.h"
+#include "Engine/SpatialWorld.h"
 #include "Music/MidiSink.h"
 #include "Music/Phrase.h"
 #include "Music/PhraseScheduler.h"
@@ -18,6 +19,9 @@ struct EngineDiagnostics
     std::size_t lateMidiEventCount = 0;
     double maximumEngineLatenessSeconds = 0.0;
     std::size_t bridgeReconnectCount = 0;
+    std::size_t physicsStepCount = 0;
+    std::size_t physicsCatchUpStepCount = 0;
+    std::size_t physicsCatchUpLimitHitCount = 0;
 };
 
 struct PhraseSnapshot
@@ -28,6 +32,9 @@ struct PhraseSnapshot
     std::string currentVariantId;
     int midiChannel = 1;
     music::NormalizedPosition position;
+    music::NormalizedVelocity velocity;
+    double radius = 0.045;
+    double mass = 1.0;
     bool playing = false;
 };
 
@@ -39,6 +46,7 @@ struct EngineSnapshot
     int bar = 1;
     double beat = 1.0;
     double engineTimeSeconds = 0.0;
+    std::size_t worldRevision = 0;
     std::size_t scheduledEventCount = 0;
     std::vector<PhraseSnapshot> phrases;
     EngineDiagnostics diagnostics;
@@ -67,6 +75,7 @@ private:
     Clock& clock;
     music::Transport transport;
     std::vector<music::Phrase> phrases;
+    SpatialWorld world;
     music::PhraseScheduler scheduler;
     double scheduledThroughBeat = 0.0;
     EngineDiagnostics diagnostics;

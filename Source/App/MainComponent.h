@@ -29,5 +29,9 @@ private:
     int midiRefreshCountdown = 30;
     juce::uint64 eventSequence = 0;
     juce::uint64 worldSnapshotSequence = 0;
+    std::size_t lastPublishedWorldRevision = 0;
+    std::size_t droppedWorldSnapshotCount = 0;
+    double lastWorldPublicationSeconds = 0.0;
+    double maximumWorldPublicationIntervalSeconds = 0.0;
 };
 } // namespace drift::app

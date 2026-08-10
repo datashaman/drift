@@ -54,7 +54,8 @@ TransportEngine::TransportEngine (Clock& clockIn, music::MidiSink& sinkIn)
     : sink (sinkIn),
       clock (clockIn),
       transport (clockIn),
-      phrases (music::makeInitialComposition())
+      phrases (music::makeInitialComposition()),
+      world (makePhraseBodies (phrases), clockIn.nowSeconds())
 {
 }
 
@@ -108,6 +109,7 @@ void TransportEngine::recordBridgeReconnect()
 
 void TransportEngine::tick()
 {
+    world.advanceTo (clock.nowSeconds());
     const auto state = transport.snapshot();
 
     if (! state.playing)
@@ -143,21 +145,34 @@ void TransportEngine::tick()
 EngineSnapshot TransportEngine::snapshot() const
 {
     const auto state = transport.snapshot();
+    const auto& bodies = world.bodies();
     std::vector<PhraseSnapshot> phraseSnapshots;
     phraseSnapshots.reserve (phrases.size());
 
-    for (const auto& phrase : phrases)
+    for (std::size_t index = 0; index < phrases.size(); ++index)
     {
+        const auto& phrase = phrases[index];
+        const auto& body = bodies[index];
         phraseSnapshots.push_back ({
             phrase.id,
             phrase.name,
             phrase.role,
             phrase.currentVariantId,
             phrase.midiChannel,
-            phrase.position,
+            body.position,
+            body.velocity,
+            body.radius,
+            body.mass,
             state.playing,
         });
     }
+
+    auto snapshotDiagnostics = diagnostics;
+    const auto& worldDiagnostics = world.diagnostics();
+    snapshotDiagnostics.physicsStepCount = worldDiagnostics.physicsStepCount;
+    snapshotDiagnostics.physicsCatchUpStepCount = worldDiagnostics.physicsCatchUpStepCount;
+    snapshotDiagnostics.physicsCatchUpLimitHitCount
+        = worldDiagnostics.physicsCatchUpLimitHitCount;
 
     return {
         state.playing,
@@ -166,9 +181,10 @@ EngineSnapshot TransportEngine::snapshot() const
         state.bar,
         state.beat,
         clock.nowSeconds(),
+        world.revision(),
         sink.messageCount(),
         std::move (phraseSnapshots),
-        diagnostics,
+        snapshotDiagnostics,
     };
 }
 } // namespace drift::engine

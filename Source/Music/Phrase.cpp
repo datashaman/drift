@@ -11,6 +11,8 @@ Phrase makePhrase (std::string id,
                    PhraseRole role,
                    int midiChannel,
                    NormalizedPosition position,
+                   NormalizedVelocity velocity,
+                   double mass,
                    std::vector<NoteEvent> events)
 {
     return {
@@ -22,6 +24,9 @@ Phrase makePhrase (std::string id,
         role,
         "A",
         position,
+        velocity,
+        0.045,
+        mass,
     };
 }
 } // namespace
@@ -48,6 +53,8 @@ std::vector<Phrase> makeInitialComposition()
         PhraseRole::rhythm,
         10,
         { 0.78, 0.58 },
+        { -0.055, -0.035 },
+        1.1,
         {
             { 0.0, 36, 108, 0.25 },
             { 0.0, 42, 76, 0.2 },
@@ -68,6 +75,8 @@ std::vector<Phrase> makeInitialComposition()
         PhraseRole::bass,
         1,
         { 0.2, 0.28 },
+        { 0.045, 0.025 },
+        1.3,
         {
             { 0.0, 36, 100, 0.75 },
             { 1.5, 36, 88, 0.25 },
@@ -80,6 +89,8 @@ std::vector<Phrase> makeInitialComposition()
         PhraseRole::harmony,
         2,
         { 0.45, 0.76 },
+        { 0.035, -0.04 },
+        1.5,
         {
             { 0.0, 48, 76, 1.5 },
             { 0.0, 51, 72, 1.5 },
@@ -94,6 +105,8 @@ std::vector<Phrase> makeInitialComposition()
         PhraseRole::lead,
         3,
         { 0.74, 0.2 },
+        { -0.04, 0.05 },
+        0.8,
         {
             { 0.0, 67, 88, 0.5 },
             { 1.0, 63, 82, 0.5 },
