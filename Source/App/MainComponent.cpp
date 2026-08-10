@@ -51,7 +51,10 @@ void MainComponent::timerCallback()
 void MainComponent::handleCommand (juce::var command)
 {
     const drift::ui::CommandHandlers handlers {
-        [this] { uiReady = true; },
+        [this] {
+            uiReady = true;
+            engine.recordBridgeReconnect();
+        },
         [this] { engine.play(); },
         [this] { engine.stop(); },
         [this] (double bpm) { engine.setBpm (bpm); },
@@ -119,6 +122,20 @@ void MainComponent::publishState()
     payload->setProperty (
         "midiStatus", drift::music::midiOutputStatusName (state.midiOutput.status));
     payload->setProperty ("midiError", juce::String { state.midiOutput.errorMessage });
+
+    auto* diagnostics = new juce::DynamicObject();
+    diagnostics->setProperty (
+        "schedulingWatermarkBeat", state.transport.diagnostics.schedulingWatermarkBeat);
+    diagnostics->setProperty (
+        "lateMidiEventCount",
+        static_cast<juce::int64> (state.transport.diagnostics.lateMidiEventCount));
+    diagnostics->setProperty (
+        "maximumEngineLatenessMs",
+        state.transport.diagnostics.maximumEngineLatenessSeconds * 1000.0);
+    diagnostics->setProperty (
+        "bridgeReconnectCount",
+        static_cast<juce::int64> (state.transport.diagnostics.bridgeReconnectCount));
+    payload->setProperty ("diagnostics", juce::var { diagnostics });
 
     publishEvent ("transport.state", juce::var { payload });
 }

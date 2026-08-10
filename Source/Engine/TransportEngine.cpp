@@ -11,18 +11,29 @@ class DeliveryTimingSink final : public music::MidiSink
 public:
     DeliveryTimingSink (music::MidiSink& targetIn,
                         double currentBeatIn,
-                        double secondsPerBeatIn)
+                        double secondsPerBeatIn,
+                        double nowSecondsIn,
+                        EngineDiagnostics& diagnosticsIn)
         : target (targetIn),
           currentBeat (currentBeatIn),
-          secondsPerBeat (secondsPerBeatIn)
+          secondsPerBeat (secondsPerBeatIn),
+          nowSeconds (nowSecondsIn),
+          diagnostics (diagnosticsIn)
     {
     }
 
     void schedule (const music::ScheduledMidiMessage& message) override
     {
         auto timestamped = message;
-        timestamped.deliveryDelaySeconds = std::max (
-            0.0, (message.beat - currentBeat) * secondsPerBeat);
+        const auto deliveryOffset = (message.beat - currentBeat) * secondsPerBeat;
+        const auto eventLateness = std::max (0.0, -deliveryOffset);
+
+        if (eventLateness > TransportEngine::timingToleranceSeconds)
+            ++diagnostics.lateMidiEventCount;
+
+        timestamped.deliveryDelaySeconds = std::max (0.0, deliveryOffset);
+        timestamped.scheduledAtSeconds = nowSeconds;
+        timestamped.deliveryTimeSeconds = nowSeconds + timestamped.deliveryDelaySeconds;
         target.schedule (timestamped);
     }
 
@@ -33,11 +44,14 @@ private:
     music::MidiSink& target;
     double currentBeat;
     double secondsPerBeat;
+    double nowSeconds;
+    EngineDiagnostics& diagnostics;
 };
 } // namespace
 
 TransportEngine::TransportEngine (Clock& clockIn, music::MidiSink& sinkIn)
     : sink (sinkIn),
+      clock (clockIn),
       transport (clockIn),
       phrase (music::makeBassPhrase())
 {
@@ -50,6 +64,9 @@ void TransportEngine::play()
 
     transport.play();
     scheduledThroughBeat = transport.snapshot().beatPosition;
+    diagnostics.schedulingWatermarkBeat = scheduledThroughBeat;
+    diagnostics.lateMidiEventCount = 0;
+    diagnostics.maximumEngineLatenessSeconds = 0.0;
     tick();
 }
 
@@ -83,6 +100,11 @@ void TransportEngine::reschedule()
         tick();
 }
 
+void TransportEngine::recordBridgeReconnect()
+{
+    ++diagnostics.bridgeReconnectCount;
+}
+
 void TransportEngine::tick()
 {
     const auto state = transport.snapshot();
@@ -91,15 +113,28 @@ void TransportEngine::tick()
         return;
 
     const auto beatsPerSecond = state.bpm / 60.0;
+    const auto secondsPerBeat = 60.0 / state.bpm;
     const auto horizonBeat = state.beatPosition + (lookAheadSeconds * beatsPerSecond);
     const auto rangeStart = scheduledThroughBeat;
+    const auto engineLatenessSeconds = std::max (
+        0.0, (state.beatPosition - scheduledThroughBeat) * secondsPerBeat);
+    diagnostics.maximumEngineLatenessSeconds = std::max (
+        diagnostics.maximumEngineLatenessSeconds, engineLatenessSeconds);
 
     if (horizonBeat <= rangeStart)
         return;
 
-    DeliveryTimingSink timingSink { sink, state.beatPosition, 60.0 / state.bpm };
+    DeliveryTimingSink timingSink {
+        sink,
+        state.beatPosition,
+        secondsPerBeat,
+        clock.nowSeconds(),
+        diagnostics,
+    };
     scheduler.scheduleRange (phrase, rangeStart, horizonBeat, timingSink);
     scheduledThroughBeat = horizonBeat;
+    diagnostics.schedulingWatermarkBeat = std::max (
+        diagnostics.schedulingWatermarkBeat, scheduledThroughBeat);
 }
 
 EngineSnapshot TransportEngine::snapshot() const
@@ -112,6 +147,7 @@ EngineSnapshot TransportEngine::snapshot() const
         state.bar,
         state.beat,
         sink.messageCount(),
+        diagnostics,
     };
 }
 } // namespace drift::engine

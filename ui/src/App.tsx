@@ -191,6 +191,22 @@ export function App({ bridge }: AppProps) {
             <dt>MIDI</dt>
             <dd>{midiSummary}</dd>
           </div>
+          <div>
+            <dt>Watermark</dt>
+            <dd>{transport.diagnostics.schedulingWatermarkBeat.toFixed(2)} beats</dd>
+          </div>
+          <div>
+            <dt>Late MIDI</dt>
+            <dd>{transport.diagnostics.lateMidiEventCount} events</dd>
+          </div>
+          <div>
+            <dt>Max late</dt>
+            <dd>{transport.diagnostics.maximumEngineLatenessMs.toFixed(3)} ms</dd>
+          </div>
+          <div>
+            <dt>Reconnects</dt>
+            <dd>{transport.diagnostics.bridgeReconnectCount}</dd>
+          </div>
         </dl>
 
         {lastRejection && (
