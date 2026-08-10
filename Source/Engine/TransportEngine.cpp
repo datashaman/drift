@@ -1,6 +1,7 @@
 #include "Engine/TransportEngine.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace drift::engine
 {
@@ -53,7 +54,7 @@ TransportEngine::TransportEngine (Clock& clockIn, music::MidiSink& sinkIn)
     : sink (sinkIn),
       clock (clockIn),
       transport (clockIn),
-      phrase (music::makeBassPhrase())
+      phrases (music::makeInitialComposition())
 {
 }
 
@@ -131,7 +132,9 @@ void TransportEngine::tick()
         clock.nowSeconds(),
         diagnostics,
     };
-    scheduler.scheduleRange (phrase, rangeStart, horizonBeat, timingSink);
+    for (const auto& phrase : phrases)
+        scheduler.scheduleRange (phrase, rangeStart, horizonBeat, timingSink);
+
     scheduledThroughBeat = horizonBeat;
     diagnostics.schedulingWatermarkBeat = std::max (
         diagnostics.schedulingWatermarkBeat, scheduledThroughBeat);
@@ -140,13 +143,31 @@ void TransportEngine::tick()
 EngineSnapshot TransportEngine::snapshot() const
 {
     const auto state = transport.snapshot();
+    std::vector<PhraseSnapshot> phraseSnapshots;
+    phraseSnapshots.reserve (phrases.size());
+
+    for (const auto& phrase : phrases)
+    {
+        phraseSnapshots.push_back ({
+            phrase.id,
+            phrase.name,
+            phrase.role,
+            phrase.currentVariantId,
+            phrase.midiChannel,
+            phrase.position,
+            state.playing,
+        });
+    }
+
     return {
         state.playing,
         state.bpm,
         state.beatPosition,
         state.bar,
         state.beat,
+        clock.nowSeconds(),
         sink.messageCount(),
+        std::move (phraseSnapshots),
         diagnostics,
     };
 }

@@ -138,6 +138,44 @@ void MainComponent::publishState()
     payload->setProperty ("diagnostics", juce::var { diagnostics });
 
     publishEvent ("transport.state", juce::var { payload });
+    publishWorldSnapshot (state);
+}
+
+void MainComponent::publishWorldSnapshot (const drift::engine::ControllerSnapshot& state)
+{
+    auto* payload = new juce::DynamicObject();
+    payload->setProperty ("sequence", static_cast<juce::int64> (++worldSnapshotSequence));
+    payload->setProperty ("engineTimeMs", state.transport.engineTimeSeconds * 1000.0);
+
+    auto* transport = new juce::DynamicObject();
+    transport->setProperty ("playing", state.transport.playing);
+    transport->setProperty ("bpm", state.transport.bpm);
+    transport->setProperty ("bar", state.transport.bar);
+    transport->setProperty ("beat", state.transport.beat);
+    payload->setProperty ("transport", juce::var { transport });
+
+    juce::Array<juce::var> phrases;
+    for (const auto& phrase : state.transport.phrases)
+    {
+        auto* phraseObject = new juce::DynamicObject();
+        phraseObject->setProperty ("id", juce::String { phrase.id });
+        phraseObject->setProperty ("name", juce::String { phrase.name });
+        phraseObject->setProperty (
+            "role", drift::music::phraseRoleName (phrase.role));
+        phraseObject->setProperty (
+            "currentVariantId", juce::String { phrase.currentVariantId });
+        phraseObject->setProperty ("midiChannel", phrase.midiChannel);
+        phraseObject->setProperty ("playing", phrase.playing);
+
+        auto* position = new juce::DynamicObject();
+        position->setProperty ("x", phrase.position.x);
+        position->setProperty ("y", phrase.position.y);
+        phraseObject->setProperty ("position", juce::var { position });
+        phrases.add (juce::var { phraseObject });
+    }
+
+    payload->setProperty ("phrases", juce::var { phrases });
+    publishEvent ("world.snapshot", juce::var { payload });
 }
 
 void MainComponent::publishEvent (const juce::String& type, juce::var payload)

@@ -9,9 +9,11 @@
 #include "UI/UiResourceProvider.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iostream>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -262,6 +264,10 @@ void testPhraseSchedulingAcrossLoopAndBar()
             { 0.0, 36, 100, 0.5 },
             { 3.75, 38, 90, 0.5 },
         },
+        "BOUNDARY TEST",
+        drift::music::PhraseRole::bass,
+        "A",
+        { 0.5, 0.5 },
     };
     drift::music::RecordingMidiSink sink;
     drift::music::PhraseScheduler scheduler;
@@ -289,6 +295,97 @@ void testPhraseSchedulingAcrossLoopAndBar()
     expect (sink.activeNoteCount() == 0, "Paired scheduling leaves no unmatched active notes");
 }
 
+void testInitialCompositionIsAuthoritative()
+{
+    const auto phrases = drift::music::makeInitialComposition();
+    expect (phrases.size() == 4, "The initial composition contains four phrases");
+
+    const std::vector<std::string> expectedIds { "drums", "bass", "chords", "melody" };
+    const std::vector<int> expectedChannels { 10, 1, 2, 3 };
+    std::set<std::string> uniqueIds;
+
+    for (std::size_t index = 0; index < phrases.size(); ++index)
+    {
+        const auto& phrase = phrases[index];
+        expect (phrase.id == expectedIds[index], "Phrase IDs are stable and role-specific");
+        expect (phrase.midiChannel == expectedChannels[index],
+                "Every role uses its required MIDI channel");
+        expect (phrase.currentVariantId == "A", "Every phrase begins on authored variant A");
+        expect (phrase.lengthBeats == 4.0, "All initial phrases share a four-beat loop");
+        expect (! phrase.events.empty(), "Every initial phrase contains authored notes");
+        expect (phrase.position.x >= 0.0 && phrase.position.x <= 1.0
+                    && phrase.position.y >= 0.0 && phrase.position.y <= 1.0,
+                "Every phrase begins at a normalized world position");
+        uniqueIds.insert (phrase.id);
+    }
+
+    expect (uniqueIds.size() == phrases.size(), "Phrase IDs are unique");
+}
+
+void testFourPhrasesShareOneTransport()
+{
+    FakeClock clock;
+    drift::music::RecordingMidiSink sink;
+    drift::engine::TransportEngine engine { clock, sink };
+
+    engine.play();
+    const std::set<int> expectedChannels { 1, 2, 3, 10 };
+    std::set<int> channelsAtFirstBeat;
+
+    for (const auto& message : sink.messages())
+    {
+        if (message.type == drift::music::MidiMessageType::noteOn
+            && std::abs (message.beat) < 1.0e-8)
+        {
+            channelsAtFirstBeat.insert (message.channel);
+        }
+    }
+
+    expect (channelsAtFirstBeat == expectedChannels,
+            "All four roles start from the same transport boundary");
+    const auto firstSnapshot = engine.snapshot();
+    expect (firstSnapshot.phrases.size() == 4,
+            "The engine snapshot exposes all four authoritative phrases");
+    expect (std::all_of (
+                firstSnapshot.phrases.begin(), firstSnapshot.phrases.end(), [] (const auto& phrase) {
+                    return phrase.playing;
+                }),
+            "Every authoritative phrase reflects the shared playing state");
+
+    clock.advance (2.0);
+    engine.tick();
+    std::set<int> channelsAtSecondLoop;
+    std::array<int, 17> noteOns {};
+    std::array<int, 17> noteOffs {};
+
+    for (const auto& message : sink.messages())
+    {
+        if (message.type == drift::music::MidiMessageType::noteOn)
+        {
+            ++noteOns[static_cast<std::size_t> (message.channel)];
+            if (std::abs (message.beat - 4.0) < 1.0e-8)
+                channelsAtSecondLoop.insert (message.channel);
+        }
+        else
+        {
+            ++noteOffs[static_cast<std::size_t> (message.channel)];
+        }
+    }
+
+    expect (channelsAtSecondLoop == expectedChannels,
+            "All four roles remain aligned at the next loop boundary");
+    for (const auto channel : expectedChannels)
+    {
+        expect (noteOns[static_cast<std::size_t> (channel)]
+                    == noteOffs[static_cast<std::size_t> (channel)],
+                "Every role schedules paired note-on and note-off events");
+    }
+
+    engine.stop();
+    expect (sink.activeNoteCount() == 0,
+            "Stopping the four-role composition leaves no active notes");
+}
+
 void testEngineIsIndependentOfUiUpdateTiming()
 {
     FakeClock clock;
@@ -297,7 +394,7 @@ void testEngineIsIndependentOfUiUpdateTiming()
 
     engine.play();
     const auto eventsAfterPlay = sink.messageCount();
-    expect (eventsAfterPlay == 2, "Play schedules the first note pair immediately");
+    expect (eventsAfterPlay > 2, "Play schedules all four phrases immediately");
 
     clock.advance (0.01);
     engine.tick();
@@ -382,22 +479,33 @@ void testMidiOutputRoutesTimestampedPhrase()
     engine.play();
 
     const auto deviceState = provider.stateFor ("synth");
-    expect (deviceState->messages.size() == 2,
-            "Starting transport routes the first note-on and note-off to the output");
-    expect (deviceState->messages[0].type == drift::music::MidiMessageType::noteOn,
-            "The routed phrase begins with note-on");
-    expect (deviceState->messages[1].type == drift::music::MidiMessageType::noteOff,
-            "The routed phrase includes its paired note-off");
-    expectNear (deviceState->messages[0].deliveryDelaySeconds, 0.0,
-                "The first note is delivered immediately");
-    expectNear (deviceState->messages[1].deliveryDelaySeconds, 0.375,
-                "The note-off receives a tempo-derived delivery timestamp");
+    expect (deviceState->messages.size() > 2,
+            "Starting transport routes all four phrases to the output");
+    const auto bassNoteOn = std::find_if (
+        deviceState->messages.begin(), deviceState->messages.end(), [] (const auto& message) {
+            return message.channel == 1 && message.note == 36
+                   && message.type == drift::music::MidiMessageType::noteOn;
+        });
+    const auto bassNoteOff = std::find_if (
+        deviceState->messages.begin(), deviceState->messages.end(), [] (const auto& message) {
+            return message.channel == 1 && message.note == 36
+                   && message.type == drift::music::MidiMessageType::noteOff;
+        });
+    expect (bassNoteOn != deviceState->messages.end(), "The routed bass phrase begins with note-on");
+    expect (bassNoteOff != deviceState->messages.end(),
+            "The routed bass phrase includes its paired note-off");
+    if (bassNoteOn != deviceState->messages.end())
+        expectNear (bassNoteOn->deliveryDelaySeconds, 0.0,
+                    "The first bass note is delivered immediately");
+    if (bassNoteOff != deviceState->messages.end())
+        expectNear (bassNoteOff->deliveryDelaySeconds, 0.375,
+                    "The bass note-off receives a tempo-derived delivery timestamp");
 
     expect (output.selectOutput ("backup"), "Playback can move to a replacement output");
     engine.reschedule();
     const auto replacementState = provider.stateFor ("backup");
-    expect (replacementState->messages.size() == 2,
-            "The replacement output receives a freshly timestamped note pair");
+    expect (replacementState->messages.size() == deviceState->messages.size(),
+            "The replacement output receives the complete freshly timestamped composition");
 
     provider.actions.clear();
     engine.stop();
@@ -545,6 +653,8 @@ void testBridgeReconnectPreservesNativePlayback()
     expect (connectCount == 2, "Repeated handshakes are accepted independently");
     expect (engine.snapshot().diagnostics.bridgeReconnectCount == 2,
             "Every accepted bridge handshake is visible in diagnostics");
+    expect (engine.snapshot().phrases.size() == 4,
+            "UI reconnect restores the complete authoritative phrase world");
     expect (engine.snapshot().playing, "UI reconnect does not stop native playback");
     expectNear (engine.snapshot().beatPosition, 1.5,
                 "UI reconnect observes ongoing monotonic native position");
@@ -578,6 +688,8 @@ int main()
     testTransportUsesMonotonicClock();
     testQuantizationBoundaries();
     testPhraseSchedulingAcrossLoopAndBar();
+    testInitialCompositionIsAuthoritative();
+    testFourPhrasesShareOneTransport();
     testEngineIsIndependentOfUiUpdateTiming();
     testMidiOutputSelectionAndReplacement();
     testMidiOutputRoutesTimestampedPhrase();

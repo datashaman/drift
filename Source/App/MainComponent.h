@@ -19,6 +19,7 @@ private:
     void handleCommand (juce::var command);
     void publishReady();
     void publishState();
+    void publishWorldSnapshot (const drift::engine::ControllerSnapshot& state);
     void publishEvent (const juce::String& type, juce::var payload);
     juce::String nextEventId();
 
@@ -27,5 +28,6 @@ private:
     bool uiReady = false;
     int midiRefreshCountdown = 30;
     juce::uint64 eventSequence = 0;
+    juce::uint64 worldSnapshotSequence = 0;
 };
 } // namespace drift::app

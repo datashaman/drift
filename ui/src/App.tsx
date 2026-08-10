@@ -4,16 +4,10 @@ import {
   createCommand,
   createTransportBridge,
   initialTransportState,
+  initialWorldSnapshot,
   type CommandRejection,
   type TransportBridge,
 } from './bridge/transportBridge'
-
-const phrases = [
-  { name: 'BASS', className: 'phrase--bass', active: true },
-  { name: 'MELODY', className: 'phrase--melody', active: false },
-  { name: 'CHORDS', className: 'phrase--chords', active: false },
-  { name: 'DRUMS', className: 'phrase--drums', active: false },
-]
 
 interface AppProps {
   bridge?: TransportBridge
@@ -22,6 +16,7 @@ interface AppProps {
 export function App({ bridge }: AppProps) {
   const transportBridge = useMemo(() => bridge ?? createTransportBridge(), [bridge])
   const [transport, setTransport] = useState(initialTransportState)
+  const [worldSnapshot, setWorldSnapshot] = useState(initialWorldSnapshot)
   const [tempoDraft, setTempoDraft] = useState(String(initialTransportState.bpm))
   const [bridgeReady, setBridgeReady] = useState(false)
   const [lastRejection, setLastRejection] = useState<CommandRejection>()
@@ -30,6 +25,11 @@ export function App({ bridge }: AppProps) {
     const unsubscribe = transportBridge.subscribe((event) => {
       if (event.type === 'app.ready') setBridgeReady(true)
       if (event.type === 'transport.state') setTransport(event.payload)
+      if (event.type === 'world.snapshot') {
+        setWorldSnapshot((current) =>
+          event.payload.sequence > current.sequence ? event.payload : current,
+        )
+      }
       if (event.type === 'command.rejected') setLastRejection(event.payload)
     })
     transportBridge.send(createCommand({ type: 'app.connect', payload: {} }))
@@ -138,20 +138,27 @@ export function App({ bridge }: AppProps) {
         <div className="relationship relationship--one" aria-hidden="true" />
         <div className="relationship relationship--two" aria-hidden="true" />
 
-        {phrases.map((phrase) => (
+        {worldSnapshot.phrases.map((phrase) => (
           <div
-            className={`phrase ${phrase.className} ${phrase.active ? 'phrase--active' : 'phrase--queued'}`}
-            key={phrase.name}
+            className={`phrase phrase--${phrase.id} ${phrase.playing ? 'phrase--active' : 'phrase--stopped'}`}
+            data-phrase-id={phrase.id}
+            key={phrase.id}
+            style={{
+              left: `${phrase.position.x * 100}%`,
+              top: `${phrase.position.y * 100}%`,
+            }}
           >
             <span className="phrase-core" aria-hidden="true" />
-            <span>{phrase.name}</span>
+            <span>{phrase.name} · {phrase.currentVariantId}</span>
           </div>
         ))}
 
         <p className="field-note">
-          {transport.midiStatus === 'connected'
-            ? 'Bass phrase online. Three roles queued.'
-            : 'Select a MIDI output to hear the bass phrase.'}
+          {worldSnapshot.phrases.length === 0
+            ? 'Awaiting authoritative world snapshot.'
+            : transport.midiStatus === 'connected'
+              ? 'Four-phrase composition online.'
+              : 'Select a MIDI output to hear the four-phrase composition.'}
         </p>
       </section>
 
@@ -181,7 +188,7 @@ export function App({ bridge }: AppProps) {
           </div>
           <div>
             <dt>Phrase</dt>
-            <dd>Bass / 4 beats</dd>
+            <dd>4 roles / 4 beats</dd>
           </div>
           <div>
             <dt>Scheduled</dt>
@@ -217,7 +224,7 @@ export function App({ bridge }: AppProps) {
         )}
         {transport.midiError && <p className="midi-error">{transport.midiError}</p>}
         <p className="status-note">
-          Musical time and MIDI scheduling live in the native engine. Connect the selected output to a synth or DAW to hear the phrase.
+          Musical time and MIDI scheduling live in the native engine. Connect the selected output to a synth or DAW to hear the composition.
         </p>
       </aside>
     </main>

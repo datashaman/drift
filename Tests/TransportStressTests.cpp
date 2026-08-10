@@ -179,7 +179,8 @@ bool hasUniqueLoopBoundaries (const std::vector<drift::music::ScheduledMidiMessa
 
     for (const auto& message : messages)
     {
-        if (message.type != drift::music::MidiMessageType::noteOn)
+        if (message.type != drift::music::MidiMessageType::noteOn
+            || message.channel != 1 || message.note != 36)
             continue;
 
         const auto loop = std::llround (message.beat / 4.0);
