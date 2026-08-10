@@ -1,6 +1,7 @@
 #include "UI/UiResourceProvider.h"
 
 #include <cstring>
+#include <utility>
 #include <vector>
 
 namespace drift::ui
@@ -53,9 +54,19 @@ std::optional<juce::WebBrowserComponent::Resource> loadResource (
     };
 }
 
-juce::WebBrowserComponent::Options makeBrowserOptions (const juce::File& root)
+juce::WebBrowserComponent::Options makeBrowserOptions (
+    const juce::File& root,
+    NativeEventListener commandListener)
 {
-    return juce::WebBrowserComponent::Options {}.withResourceProvider (
+    auto options = juce::WebBrowserComponent::Options {}.withResourceProvider (
         [root] (const juce::String& path) { return loadResource (root, path); });
+
+    if (commandListener)
+    {
+        options = options.withNativeIntegrationEnabled()
+                         .withEventListener ("drift.command", std::move (commandListener));
+    }
+
+    return options;
 }
 } // namespace drift::ui

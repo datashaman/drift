@@ -84,7 +84,7 @@ Drift is in the design and initial implementation phase. The first development b
 5. [Prove transport stability under simulated UI stress](https://github.com/datashaman/drift/issues/5)
 6. [Validate ten-minute playback through a real MIDI device](https://github.com/datashaman/drift/issues/6)
 
-The first application shell packages a React status interface inside a native JUCE window. Transport, MIDI, and the interactive phrase world arrive in later slices.
+The native shell now connects React Play, Stop, and BPM controls to a native-owned monotonic transport and one hard-coded looping bass phrase. Events are currently written to a recording MIDI sink; selectable real MIDI output and the interactive phrase world arrive in later slices.
 
 ## Development
 

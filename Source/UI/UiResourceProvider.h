@@ -6,11 +6,15 @@
 
 namespace drift::ui
 {
+using NativeEventListener = juce::WebBrowserComponent::NativeEventListener;
+
 juce::String contentTypeForPath (const juce::String& path);
 
 std::optional<juce::WebBrowserComponent::Resource> loadResource (
     const juce::File& root,
     const juce::String& requestedPath);
 
-juce::WebBrowserComponent::Options makeBrowserOptions (const juce::File& root);
+juce::WebBrowserComponent::Options makeBrowserOptions (
+    const juce::File& root,
+    NativeEventListener commandListener = {});
 } // namespace drift::ui
