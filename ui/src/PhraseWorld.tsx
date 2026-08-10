@@ -10,19 +10,31 @@ import type {
 
 import type { PhraseSnapshot, WorldSnapshot } from './bridge/transportBridge'
 import {
+  appendPointerSample,
   clampPositionForPhrase,
+  estimateReleaseVelocity,
   findPhraseAtPosition,
   normalisePointerPosition,
   shouldClearOptimisticDrag,
   type NormalizedPoint,
+  type PointerSample,
 } from './dragInteraction'
 import { interpolatePhrases } from './worldInterpolation'
 
 interface PhraseWorldProps {
   snapshot: WorldSnapshot
-  onDragStart(phraseId: string): void
-  onDragMove(phraseId: string, position: NormalizedPoint): void
-  onDragEnd(phraseId: string): void
+  onDragStart(phraseId: string, dragSessionId: string): void
+  onDragMove(
+    phraseId: string,
+    dragSessionId: string,
+    position: NormalizedPoint,
+  ): void
+  onDragEnd(phraseId: string, dragSessionId: string): void
+  onThrow(
+    phraseId: string,
+    dragSessionId: string,
+    velocity: NormalizedPoint,
+  ): void
 }
 
 interface SceneNode {
@@ -35,10 +47,19 @@ interface SceneNode {
 
 interface OptimisticDrag {
   phraseId: string
+  dragSessionId: string
   pointerId: number
   position: NormalizedPoint
+  samples: PointerSample[]
   startedSequence: number
   releasedSequence?: number
+}
+
+let dragSessionSequence = 0
+
+function nextDragSessionId() {
+  dragSessionSequence += 1
+  return `drag-${dragSessionSequence}`
 }
 
 const phraseColours: Record<string, number> = {
@@ -57,6 +78,7 @@ export function PhraseWorld({
   onDragStart,
   onDragMove,
   onDragEnd,
+  onThrow,
 }: PhraseWorldProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const optimisticDragRef = useRef<OptimisticDrag | undefined>(undefined)
@@ -229,14 +251,17 @@ export function PhraseWorld({
     event.preventDefault()
     event.currentTarget.setPointerCapture(event.pointerId)
     const clamped = clampPositionForPhrase(position, phrase.radius)
+    const dragSessionId = nextDragSessionId()
     optimisticDragRef.current = {
       phraseId: phrase.id,
+      dragSessionId,
       pointerId: event.pointerId,
       position: clamped,
+      samples: [{ position: clamped, timeMs: event.timeStamp }],
       startedSequence: snapshot.sequence,
     }
-    onDragStart(phrase.id)
-    onDragMove(phrase.id, clamped)
+    onDragStart(phrase.id, dragSessionId)
+    onDragMove(phrase.id, dragSessionId, clamped)
   }
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -250,7 +275,11 @@ export function PhraseWorld({
     event.preventDefault()
     const clamped = clampPositionForPhrase(pointerPosition(event), phrase.radius)
     optimistic.position = clamped
-    onDragMove(phrase.id, clamped)
+    optimistic.samples = appendPointerSample(optimistic.samples, {
+      position: clamped,
+      timeMs: event.timeStamp,
+    })
+    onDragMove(phrase.id, optimistic.dragSessionId, clamped)
   }
 
   const endPointerDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -262,8 +291,16 @@ export function PhraseWorld({
     if (phrase) {
       const clamped = clampPositionForPhrase(pointerPosition(event), phrase.radius)
       optimistic.position = clamped
-      onDragMove(phrase.id, clamped)
-      onDragEnd(phrase.id)
+      optimistic.samples = appendPointerSample(optimistic.samples, {
+        position: clamped,
+        timeMs: event.timeStamp,
+      })
+      onDragMove(phrase.id, optimistic.dragSessionId, clamped)
+      onThrow(
+        phrase.id,
+        optimistic.dragSessionId,
+        estimateReleaseVelocity(optimistic.samples),
+      )
     }
     optimistic.releasedSequence = snapshot.sequence
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
@@ -276,7 +313,7 @@ export function PhraseWorld({
     if (!optimistic || optimistic.pointerId !== event.pointerId
         || optimistic.releasedSequence !== undefined) return
 
-    onDragEnd(optimistic.phraseId)
+    onDragEnd(optimistic.phraseId, optimistic.dragSessionId)
     optimistic.releasedSequence = snapshot.sequence
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)

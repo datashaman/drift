@@ -30,6 +30,8 @@ class SpatialWorld
 public:
     static constexpr double fixedStepSeconds = 1.0 / 120.0;
     static constexpr int maximumCatchUpSteps = 8;
+    static constexpr double maximumThrowSpeed = 1.5;
+    static constexpr double stationaryVelocityThreshold = 0.015;
 
     SpatialWorld (std::vector<PhraseBody> bodiesIn, double initialTimeSeconds);
 
@@ -38,6 +40,8 @@ public:
     bool moveDraggedPhrase (const std::string& phraseId,
                             music::NormalizedPosition position);
     bool endDrag (const std::string& phraseId);
+    bool throwPhrase (const std::string& phraseId,
+                      music::NormalizedVelocity velocity);
     void endAllDrags();
     bool containsPhrase (const std::string& phraseId) const noexcept;
 

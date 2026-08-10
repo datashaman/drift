@@ -19,9 +19,14 @@ CommandEnqueueResult EngineCommandQueue::tryEnqueue (EngineCommand command)
     const auto isMove = command.type == EngineCommandType::phraseMove;
     const auto isDragStart = command.type == EngineCommandType::phraseDragStart;
     const auto isDragEnd = command.type == EngineCommandType::phraseDragEnd;
-    const auto isDragging = intendedDraggedPhraseIds.contains (command.phraseId);
+    const auto isThrow = command.type == EngineCommandType::phraseThrow;
+    const auto activeDrag = intendedDragSessions.find (command.phraseId);
+    const auto isDragging = activeDrag != intendedDragSessions.end();
+    const auto matchesSession = isDragging
+                                && activeDrag->second == command.dragSessionId;
 
-    if ((isDragStart && isDragging) || ((isMove || isDragEnd) && ! isDragging))
+    if ((isDragStart && isDragging)
+        || ((isMove || isDragEnd || isThrow) && ! matchesSession))
         return reject (CommandEnqueueResult::staleDrag, false);
 
     if (isMove)
@@ -62,11 +67,12 @@ CommandEnqueueResult EngineCommandQueue::tryEnqueue (EngineCommand command)
     const auto& accepted = commands.back();
 
     if (accepted.type == EngineCommandType::phraseDragStart)
-        intendedDraggedPhraseIds.insert (accepted.phraseId);
-    else if (accepted.type == EngineCommandType::phraseDragEnd)
-        intendedDraggedPhraseIds.erase (accepted.phraseId);
+        intendedDragSessions[accepted.phraseId] = accepted.dragSessionId;
+    else if (accepted.type == EngineCommandType::phraseDragEnd
+             || accepted.type == EngineCommandType::phraseThrow)
+        intendedDragSessions.erase (accepted.phraseId);
     else if (accepted.type == EngineCommandType::appConnect)
-        intendedDraggedPhraseIds.clear();
+        intendedDragSessions.clear();
 
     recordDepth (commands.size());
     return CommandEnqueueResult::accepted;

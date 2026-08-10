@@ -158,6 +158,12 @@ bool TransportEngine::endPhraseDrag (const std::string& phraseId)
     return world.endDrag (phraseId);
 }
 
+bool TransportEngine::throwPhrase (const std::string& phraseId,
+                                   music::NormalizedVelocity velocity)
+{
+    return world.throwPhrase (phraseId, velocity);
+}
+
 void TransportEngine::endAllPhraseDrags()
 {
     world.endAllDrags();

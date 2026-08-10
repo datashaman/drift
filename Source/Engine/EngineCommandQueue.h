@@ -8,7 +8,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
-#include <unordered_set>
+#include <unordered_map>
 
 namespace drift::engine
 {
@@ -22,6 +22,7 @@ enum class EngineCommandType
     phraseDragStart,
     phraseMove,
     phraseDragEnd,
+    phraseThrow,
 };
 
 struct EngineCommand
@@ -29,9 +30,11 @@ struct EngineCommand
     EngineCommandType type = EngineCommandType::appConnect;
     std::string messageId;
     std::string phraseId;
+    std::string dragSessionId;
     std::string outputId;
     double bpm = 120.0;
     music::NormalizedPosition position;
+    music::NormalizedVelocity velocity;
 };
 
 enum class CommandEnqueueResult
@@ -71,7 +74,7 @@ private:
     const std::size_t capacity;
     mutable std::mutex mutex;
     std::deque<EngineCommand> commands;
-    std::unordered_set<std::string> intendedDraggedPhraseIds;
+    std::unordered_map<std::string, std::string> intendedDragSessions;
     std::atomic<std::size_t> queueDepth { 0 };
     std::atomic<std::size_t> maximumQueueDepth { 0 };
     std::atomic<std::size_t> coalescedMoveCount { 0 };

@@ -305,31 +305,82 @@ describe('Drift bridge interface', () => {
 
     fireEvent.pointerDown(pointerLayer, { pointerId: 7, clientX: 200, clientY: 140 })
     expect(bridge.commands.slice(-2)).toMatchObject([
-      { type: 'phrase.dragStart', payload: { phraseId: 'bass' } },
+      {
+        type: 'phrase.dragStart',
+        payload: { phraseId: 'bass', dragSessionId: expect.any(String) },
+      },
       {
         type: 'phrase.move',
-        payload: { phraseId: 'bass', position: { x: 0.2, y: 0.28 } },
+        payload: {
+          phraseId: 'bass',
+          dragSessionId: expect.any(String),
+          position: { x: 0.2, y: 0.28 },
+        },
       },
     ])
+    const dragStartCommand = bridge.commands.at(-2)
+    if (dragStartCommand?.type !== 'phrase.dragStart') {
+      throw new Error('Expected phrase.dragStart')
+    }
+    const dragSessionId = dragStartCommand.payload.dragSessionId
     expect(pointerLayer.setPointerCapture).toHaveBeenCalledWith(7)
 
     fireEvent.pointerMove(pointerLayer, { pointerId: 7, clientX: 500, clientY: 250 })
     expect(bridge.commands.at(-1)).toMatchObject({
       type: 'phrase.move',
-      payload: { phraseId: 'bass', position: { x: 0.5, y: 0.5 } },
+      payload: { phraseId: 'bass', dragSessionId, position: { x: 0.5, y: 0.5 } },
     })
 
     fireEvent.pointerUp(pointerLayer, { pointerId: 7, clientX: 500, clientY: 250 })
     expect(bridge.commands.at(-1)).toMatchObject({
-      type: 'phrase.dragEnd',
-      payload: { phraseId: 'bass' },
+      type: 'phrase.throw',
+      payload: {
+        phraseId: 'bass',
+        dragSessionId,
+        velocity: { x: expect.any(Number), y: expect.any(Number) },
+      },
     })
+    const throwCommand = bridge.commands.at(-1)
+    if (throwCommand?.type !== 'phrase.throw') {
+      throw new Error('Expected phrase.throw')
+    }
+    const velocity = throwCommand.payload.velocity
+    expect(Math.hypot(velocity.x, velocity.y)).toBeCloseTo(1.5)
     expect(pointerLayer.releasePointerCapture).toHaveBeenCalledWith(7)
 
     const selectedWorld = worldEvent(5)
     selectedWorld.payload.phrases[1].dragged = true
     act(() => bridge.publish(selectedWorld))
     expect(screen.getByText(/BASS · A · playing · selected/)).toBeTruthy()
+  })
+
+  it('ends an interrupted pointer lifecycle without throwing', () => {
+    const bridge = new FakeTransportBridge()
+    render(<App bridge={bridge} />)
+    act(() => bridge.publish(worldEvent(4)))
+
+    const pointerLayer = screen.getByLabelText('Drag phrase field') as HTMLDivElement
+    vi.spyOn(pointerLayer, 'getBoundingClientRect').mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 1000, bottom: 500,
+      width: 1000, height: 500, toJSON: () => ({}),
+    })
+    pointerLayer.setPointerCapture = vi.fn()
+    pointerLayer.hasPointerCapture = vi.fn(() => true)
+    pointerLayer.releasePointerCapture = vi.fn()
+
+    fireEvent.pointerDown(pointerLayer, { pointerId: 8, clientX: 200, clientY: 140 })
+    const dragStartCommand = bridge.commands.at(-2)
+    if (dragStartCommand?.type !== 'phrase.dragStart') {
+      throw new Error('Expected phrase.dragStart')
+    }
+    const dragSessionId = dragStartCommand.payload.dragSessionId
+    fireEvent.pointerCancel(pointerLayer, { pointerId: 8 })
+
+    expect(bridge.commands.at(-1)).toMatchObject({
+      type: 'phrase.dragEnd',
+      payload: { phraseId: 'bass', dragSessionId },
+    })
+    expect(bridge.commands.filter(({ type }) => type === 'phrase.throw')).toHaveLength(0)
   })
 
   it('selects opaque MIDI IDs and displays structured command rejections', () => {

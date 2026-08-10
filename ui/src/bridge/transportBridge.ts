@@ -132,12 +132,30 @@ export type TransportCommand =
   | { type: 'transport.stop'; payload: Record<string, never> }
   | { type: 'transport.setTempo'; payload: { bpm: number } }
   | { type: 'midi.selectOutput'; payload: { outputId: string } }
-  | { type: 'phrase.dragStart'; payload: { phraseId: string } }
+  | {
+      type: 'phrase.dragStart'
+      payload: { phraseId: string; dragSessionId: string }
+    }
   | {
       type: 'phrase.move'
-      payload: { phraseId: string; position: { x: number; y: number } }
+      payload: {
+        phraseId: string
+        dragSessionId: string
+        position: { x: number; y: number }
+      }
     }
-  | { type: 'phrase.dragEnd'; payload: { phraseId: string } }
+  | {
+      type: 'phrase.dragEnd'
+      payload: { phraseId: string; dragSessionId: string }
+    }
+  | {
+      type: 'phrase.throw'
+      payload: {
+        phraseId: string
+        dragSessionId: string
+        velocity: { x: number; y: number }
+      }
+    }
 
 export type CommandEnvelope = TransportCommand & {
   protocolVersion: typeof protocolVersion

@@ -42,6 +42,7 @@ struct SimulationResult
     int uiStallCount = 0;
     int uiObservationCount = 0;
     int dragMoveCount = 0;
+    int throwCount = 0;
 };
 
 juce::var makeConnectCommand (int sequence)
@@ -74,6 +75,7 @@ SimulationResult runSimulation (bool stressUi)
         {},
         {},
         {},
+        {},
     };
     SimulationResult result;
     auto previousWatermark = 0.0;
@@ -90,16 +92,25 @@ SimulationResult runSimulation (bool stressUi)
         if (stressUi)
         {
             const auto dragPhase = tick % 3000;
+            const std::array<std::string, 4> phraseIds {
+                "drums", "bass", "chords", "melody"
+            };
+            const auto cycle = tick / 3000;
+            const auto& phraseId = phraseIds[static_cast<std::size_t> (cycle) % phraseIds.size()];
             if (dragPhase == 1)
-                engine.beginPhraseDrag ("bass");
+                engine.beginPhraseDrag (phraseId);
             else if (dragPhase > 1 && dragPhase < 1000)
             {
                 const auto movement = static_cast<double> (dragPhase) / 1000.0;
-                if (engine.moveDraggedPhrase ("bass", { movement, 1.0 - movement }))
+                if (engine.moveDraggedPhrase (phraseId, { movement, 1.0 - movement }))
                     ++result.dragMoveCount;
             }
             else if (dragPhase == 1000)
-                engine.endPhraseDrag ("bass");
+            {
+                const auto direction = cycle % 2 == 0 ? 1.0 : -1.0;
+                if (engine.throwPhrase (phraseId, { 0.8 * direction, -0.45 }))
+                    ++result.throwCount;
+            }
         }
 
         engine.tick();
@@ -275,6 +286,8 @@ int main()
     require (stressed.uiStallCount >= 10, "the harness did not introduce enough UI stalls");
     require (stressed.dragMoveCount > 90000,
              "the harness did not generate sustained drag pressure");
+    require (stressed.throwCount >= 95,
+             "the harness did not rapidly throw all four phrases");
 
     std::cout << std::fixed << std::setprecision (9)
               << "Drift deterministic timing stress report\n"
@@ -284,6 +297,7 @@ int main()
               << "UI stalls: " << stressed.uiStallCount << '\n'
               << "UI observations: " << stressed.uiObservationCount << '\n'
               << "Drag moves: " << stressed.dragMoveCount << '\n'
+              << "Throws: " << stressed.throwCount << '\n'
               << "Bridge reconnects: "
               << stressed.snapshot.diagnostics.bridgeReconnectCount << '\n'
               << "Physics steps: " << stressed.snapshot.diagnostics.physicsStepCount << '\n'

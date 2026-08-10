@@ -5,6 +5,16 @@ export interface NormalizedPoint {
   y: number
 }
 
+export interface PointerSample {
+  position: NormalizedPoint
+  timeMs: number
+}
+
+export const maximumPointerSamples = 8
+export const pointerSampleWindowMs = 120
+export const maximumThrowSpeed = 1.5
+export const stationaryVelocityThreshold = 0.015
+
 export interface PointerBounds {
   left: number
   top: number
@@ -29,6 +39,38 @@ export function normalisePointerPosition(
     x: Math.min(1, Math.max(0, (clientX - bounds.left) / bounds.width)),
     y: Math.min(1, Math.max(0, (clientY - bounds.top) / bounds.height)),
   }
+}
+
+export function appendPointerSample(
+  samples: PointerSample[],
+  sample: PointerSample,
+): PointerSample[] {
+  const earliestTime = sample.timeMs - pointerSampleWindowMs
+  return [...samples, sample]
+    .filter((candidate) => candidate.timeMs >= earliestTime)
+    .slice(-maximumPointerSamples)
+}
+
+export function estimateReleaseVelocity(samples: PointerSample[]): NormalizedPoint {
+  if (samples.length < 2) return { x: 0, y: 0 }
+
+  const first = samples[0]
+  const last = samples[samples.length - 1]
+  const elapsedSeconds = (last.timeMs - first.timeMs) / 1000
+  if (!Number.isFinite(elapsedSeconds) || elapsedSeconds <= 0) return { x: 0, y: 0 }
+
+  const velocity = {
+    x: (last.position.x - first.position.x) / elapsedSeconds,
+    y: (last.position.y - first.position.y) / elapsedSeconds,
+  }
+  const speed = Math.hypot(velocity.x, velocity.y)
+  if (!Number.isFinite(speed) || speed < stationaryVelocityThreshold) {
+    return { x: 0, y: 0 }
+  }
+  if (speed <= maximumThrowSpeed) return velocity
+
+  const scale = maximumThrowSpeed / speed
+  return { x: velocity.x * scale, y: velocity.y * scale }
 }
 
 export function clampPositionForPhrase(
