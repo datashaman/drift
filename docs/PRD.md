@@ -19,7 +19,7 @@ The POC exists to answer one question:
 
 > Can manipulating musical phrases as spatial objects produce an interaction that is both musically useful and enjoyable?
 
-Drift is not a DAW, production environment, or finished instrument. It is a focused experiment in whether spatial reasoning can become a predictable musical control surface.
+Drift is not a DAW, production environment, or finished instrument. It is a focused experiment in whether spatial dynamics can produce a musical experience that is compelling to shape, perturb, or observe.
 
 ## 2. Product principles
 
@@ -52,9 +52,9 @@ A collision may request a pattern change, for example, but it must not emit an i
 
 All phrases and variants are manually authored to work together. Spatial interaction transforms an already-musical composition rather than attempting to create coherence from randomness.
 
-### 2.4 Optimize for intentionality
+### 2.4 Support agency without eliminating emergence
 
-The user should learn what classes of musical result follow from particular spatial actions. Predictability and legibility matter more than generative sophistication.
+The user should be able to form useful relationships between spatial actions and musical outcomes without needing complete control over the system. Legibility and meaningful influence matter, but surprise, emergence, and autonomous behavior are valid parts of the experience rather than failures to be designed away.
 
 ## 3. Goals
 
@@ -332,16 +332,20 @@ Without documentation, a new user can:
 
 ## 11. Evaluation plan
 
-The POC is successful when manipulating objects feels like manipulating the composition, not merely a visualization.
+The POC is successful if its spatial world produces musically compelling behavior and gives the user a meaningful relationship with its evolution. That relationship may take several forms:
 
-After approximately five minutes, a user should be able to intentionally produce musical changes by grouping and separating objects, moving particular phrases, and causing deliberate collisions.
+- **Deliberate composition:** the user predicts a class of result and performs a spatial action to produce it.
+- **Playful intervention:** the user perturbs the system, hears how it responds, and uses that response to choose a next action.
+- **Observation:** autonomous phrase behavior remains musically coherent, visually engaging, and interesting without continuous manipulation.
 
-The strongest success signal is a repeated intentional loop:
+After approximately five minutes, a user should be able to describe how their actions affect the system, identify behavior they find musically or visually compelling, or express interest in watching the ecosystem continue to evolve.
 
-1. The user predicts a class of musical result.
-2. The user performs a spatial action.
-3. The expected kind of change is heard.
-4. The result informs the user's next action.
+A repeated intentional loop remains one strong success signal, but it is not the only one:
+
+1. The user predicts or explores a class of musical result.
+2. The user performs a spatial action or chooses to let the system evolve.
+3. The system produces a legible or compelling response.
+4. The result informs the user's next action, or sustains their interest without one.
 
 Example spatial intuition:
 
@@ -356,7 +360,7 @@ Example spatial intuition:
     → collide melody with chords
 ```
 
-If the experience feels like watching a generative screensaver, or if users cannot form reliable expectations, the interaction model has failed.
+The experiment has failed only if the spatial model contributes neither compelling autonomous behavior nor meaningful opportunities for intervention—for example, if the same musical experience would be served just as well by non-spatial controls.
 
 ## 12. Open product questions
 
@@ -368,4 +372,3 @@ The following should be resolved through the POC rather than designed in advance
 - How many speed/activity bands are perceptually useful?
 - How much relationship visualization helps before the world becomes visually noisy?
 - Does changing BPM belong in the primary POC interaction, or should tempo remain fixed during evaluation?
-
