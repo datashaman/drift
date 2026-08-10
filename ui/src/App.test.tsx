@@ -5,63 +5,102 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { App } from './App'
 import {
+  createCommand,
   createTransportBridge,
   initialTransportState,
+  protocolVersion,
+  type BridgeEventEnvelope,
+  type CommandEnvelope,
   type JuceBackend,
   type TransportBridge,
-  type TransportCommand,
   type TransportState,
 } from './bridge/transportBridge'
 
+function readyEvent(messageId = 'native-ready'): BridgeEventEnvelope {
+  return {
+    protocolVersion,
+    messageId,
+    type: 'app.ready',
+    payload: { protocolVersion },
+  }
+}
+
+function stateEvent(
+  state: TransportState,
+  messageId = 'native-state',
+): BridgeEventEnvelope {
+  return {
+    protocolVersion,
+    messageId,
+    type: 'transport.state',
+    payload: state,
+  }
+}
+
 class FakeTransportBridge implements TransportBridge {
   readonly connected = true
-  readonly commands: TransportCommand[] = []
-  private listener?: (state: TransportState) => void
+  readonly commands: CommandEnvelope[] = []
+  private listener?: (event: BridgeEventEnvelope) => void
 
-  send(command: TransportCommand) {
+  send(command: CommandEnvelope) {
     this.commands.push(command)
   }
 
-  subscribe(listener: (state: TransportState) => void) {
+  subscribe(listener: (event: BridgeEventEnvelope) => void) {
     this.listener = listener
     return () => {
       this.listener = undefined
     }
   }
 
-  publish(state: TransportState) {
-    this.listener?.(state)
+  publish(event: BridgeEventEnvelope) {
+    this.listener?.(event)
   }
 }
 
 afterEach(cleanup)
 
-describe('Drift transport interface', () => {
-  it('sends play, tempo, and stop intents while rendering authoritative state', () => {
+describe('Drift bridge interface', () => {
+  it('sends versioned commands and renders authoritative state envelopes', () => {
     const bridge = new FakeTransportBridge()
     render(<App bridge={bridge} />)
 
-    expect(bridge.commands).toContainEqual({ type: 'ui.ready' })
+    expect(bridge.commands[0]).toMatchObject({
+      protocolVersion,
+      type: 'app.connect',
+      payload: {},
+    })
+    expect(bridge.commands[0].messageId).toMatch(/^ui-\d+$/)
 
+    act(() => bridge.publish(readyEvent()))
     fireEvent.click(screen.getByRole('button', { name: /play/i }))
-    expect(bridge.commands).toContainEqual({ type: 'transport.play' })
+    expect(bridge.commands.at(-1)).toMatchObject({
+      protocolVersion,
+      type: 'transport.play',
+      payload: {},
+    })
 
     const tempoInput = screen.getByLabelText('Tempo in BPM')
     fireEvent.change(tempoInput, { target: { value: '96' } })
-    expect(bridge.commands).not.toContainEqual({ type: 'transport.setTempo', bpm: 9 })
+    expect(bridge.commands.some((command) => command.type === 'transport.setTempo')).toBe(false)
     fireEvent.blur(tempoInput)
-    expect(bridge.commands).toContainEqual({ type: 'transport.setTempo', bpm: 96 })
+    expect(bridge.commands.at(-1)).toMatchObject({
+      type: 'transport.setTempo',
+      payload: { bpm: 96 },
+    })
 
     act(() => {
-      bridge.publish({
-        ...initialTransportState,
-        playing: true,
-        bpm: 96,
-        bar: 3,
-        beat: 2.5,
-        beatPosition: 9.5,
-        scheduledEventCount: 18,
-      })
+      bridge.publish(
+        stateEvent({
+          ...initialTransportState,
+          playing: true,
+          bpm: 96,
+          bar: 3,
+          beat: 2.5,
+          beatPosition: 9.5,
+          scheduledEventCount: 18,
+        }),
+      )
     })
 
     expect(screen.getByText('Playing')).toBeTruthy()
@@ -70,80 +109,115 @@ describe('Drift transport interface', () => {
     expect(screen.getByText('18 events')).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: /stop/i }))
-    expect(bridge.commands).toContainEqual({ type: 'transport.stop' })
+    expect(bridge.commands.at(-1)).toMatchObject({ type: 'transport.stop', payload: {} })
   })
 
-  it('adapts JUCE event channels to the typed transport bridge', () => {
-    let stateListener: ((payload: unknown) => void) | undefined
+  it('adapts only valid JUCE event envelopes to the typed bridge', () => {
+    let eventListener: ((payload: unknown) => void) | undefined
+    let subscribedEventId = ''
     const emitted: Array<{ eventId: string; payload: unknown }> = []
     const backend: JuceBackend = {
       emitEvent: (eventId, payload) => emitted.push({ eventId, payload }),
-      addEventListener: (_eventId, listener) => {
-        stateListener = listener
+      addEventListener: (eventId, listener) => {
+        subscribedEventId = eventId
+        eventListener = listener
         return 42
       },
       removeEventListener: () => undefined,
     }
     const bridge = createTransportBridge(backend)
     let received = initialTransportState
-    bridge.subscribe((state) => {
-      received = state
+    bridge.subscribe((event) => {
+      if (event.type === 'transport.state') received = event.payload
     })
 
-    bridge.send({ type: 'transport.play' })
-    expect(emitted).toContainEqual({
-      eventId: 'drift.command',
-      payload: { type: 'transport.play' },
-    })
+    const play = createCommand({ type: 'transport.play', payload: {} })
+    bridge.send(play)
+    expect(emitted).toContainEqual({ eventId: 'drift.command', payload: play })
+    expect(subscribedEventId).toBe('drift.event')
 
-    stateListener?.({ ...initialTransportState, bar: 4, beat: 1 })
+    eventListener?.({ ...stateEvent({ ...initialTransportState, bar: 99 }), protocolVersion: 2 })
+    expect(received.bar).toBe(1)
+
+    eventListener?.(stateEvent({ ...initialTransportState, bar: 4, beat: 1 }))
     expect(received.bar).toBe(4)
   })
 
-  it('selects opaque MIDI output IDs and renders connection failures', () => {
+  it('selects opaque MIDI IDs and displays structured command rejections', () => {
     const bridge = new FakeTransportBridge()
     render(<App bridge={bridge} />)
-
     act(() => {
-      bridge.publish({
-        ...initialTransportState,
-        midiOutputs: [
-          { id: 'runtime:42', name: 'Studio Synth' },
-          { id: 'runtime:99', name: 'Loopback Bus' },
-        ],
-      })
+      bridge.publish(readyEvent())
+      bridge.publish(
+        stateEvent({
+          ...initialTransportState,
+          midiOutputs: [
+            { id: 'runtime:42', name: 'Studio Synth' },
+            { id: 'runtime:99', name: 'Loopback Bus' },
+          ],
+        }),
+      )
     })
 
-    const outputSelect = screen.getByLabelText('MIDI output')
-    fireEvent.change(outputSelect, { target: { value: 'runtime:42' } })
-    expect(bridge.commands).toContainEqual({
+    fireEvent.change(screen.getByLabelText('MIDI output'), {
+      target: { value: 'runtime:42' },
+    })
+    expect(bridge.commands.at(-1)).toMatchObject({
       type: 'midi.selectOutput',
-      outputId: 'runtime:42',
+      payload: { outputId: 'runtime:42' },
     })
 
     act(() => {
       bridge.publish({
-        ...initialTransportState,
-        midiOutputs: [{ id: 'runtime:42', name: 'Studio Synth' }],
-        selectedMidiOutputId: 'runtime:42',
-        midiStatus: 'connected',
+        protocolVersion,
+        messageId: 'native-rejection',
+        type: 'command.rejected',
+        payload: {
+          commandMessageId: bridge.commands.at(-1)?.messageId ?? '',
+          code: 'unknown_id',
+          message: 'The MIDI outputId is not currently available',
+        },
       })
     })
-    expect(screen.getAllByText('Studio Synth')).toHaveLength(2)
-    expect(screen.getByText(/bass phrase online/i)).toBeTruthy()
 
-    act(() => {
-      bridge.publish({
-        ...initialTransportState,
-        midiStatus: 'error',
-        midiError: 'Could not open the selected MIDI output',
-      })
-    })
-    expect(screen.getByText('Output error')).toBeTruthy()
-    expect(screen.getByText('Could not open the selected MIDI output')).toBeTruthy()
+    expect(screen.getByRole('alert').textContent).toContain('unknown_id')
+    expect(screen.getByRole('alert').textContent).toContain('not currently available')
   })
 
-  it('disables transport controls outside the native host', () => {
+  it('reconnects after reload and restores ongoing authoritative state', () => {
+    const bridge = new FakeTransportBridge()
+    const firstLoad = render(<App bridge={bridge} />)
+    act(() => {
+      bridge.publish(readyEvent('native-ready-1'))
+      bridge.publish(
+        stateEvent(
+          { ...initialTransportState, playing: true, bar: 7, beat: 3.25 },
+          'native-state-1',
+        ),
+      )
+    })
+    expect(screen.getByText('Playing')).toBeTruthy()
+    firstLoad.unmount()
+
+    render(<App bridge={bridge} />)
+    expect(bridge.commands.filter((command) => command.type === 'app.connect')).toHaveLength(2)
+
+    act(() => {
+      bridge.publish(readyEvent('native-ready-2'))
+      bridge.publish(
+        stateEvent(
+          { ...initialTransportState, playing: true, bar: 7, beat: 3.75 },
+          'native-state-2',
+        ),
+      )
+    })
+    expect(screen.getByText('Native engine linked')).toBeTruthy()
+    expect(screen.getByText('Playing')).toBeTruthy()
+    expect(screen.getByText('07')).toBeTruthy()
+    expect(screen.getByText('3.75')).toBeTruthy()
+  })
+
+  it('disables commands outside the native host', () => {
     render(<App bridge={createTransportBridge(undefined)} />)
 
     expect((screen.getByRole('button', { name: /play/i }) as HTMLButtonElement).disabled).toBe(true)

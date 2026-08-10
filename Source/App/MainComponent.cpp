@@ -1,7 +1,9 @@
 #include "App/MainComponent.h"
 
+#include "UI/BridgeProtocol.h"
 #include "UI/UiResourceProvider.h"
 
+#include <algorithm>
 #include <utility>
 
 namespace drift::app
@@ -48,51 +50,58 @@ void MainComponent::timerCallback()
 
 void MainComponent::handleCommand (juce::var command)
 {
-    const auto* object = command.getDynamicObject();
+    const drift::ui::CommandHandlers handlers {
+        [this] { uiReady = true; },
+        [this] { engine.play(); },
+        [this] { engine.stop(); },
+        [this] (double bpm) { engine.setBpm (bpm); },
+        [this] (const std::string& outputId) { engine.selectMidiOutput (outputId); },
+        [this] (const std::string& outputId) {
+            const auto state = engine.snapshot();
+            return std::any_of (
+                state.midiOutput.outputs.begin(),
+                state.midiOutput.outputs.end(),
+                [&outputId] (const auto& output) { return output.id == outputId; });
+        },
+    };
 
-    if (object == nullptr)
+    const auto result = drift::ui::dispatchCommandEnvelope (command, handlers);
+
+    if (result.rejection.has_value())
+    {
+        publishEvent ("command.rejected",
+                      drift::ui::makeCommandRejectedPayload (*result.rejection));
         return;
+    }
 
-    const auto type = object->getProperty ("type").toString();
-
-    if (type == "ui.ready")
+    if (result.command->type == drift::ui::BridgeCommandType::appConnect)
     {
-        uiReady = true;
-    }
-    else if (type == "transport.play")
-    {
-        engine.play();
-    }
-    else if (type == "transport.stop")
-    {
-        engine.stop();
-    }
-    else if (type == "transport.setTempo")
-    {
-        const auto bpm = object->getProperty ("bpm");
-
-        if (bpm.isInt() || bpm.isInt64() || bpm.isDouble())
-            engine.setBpm (static_cast<double> (bpm));
-    }
-    else if (type == "midi.selectOutput")
-    {
-        engine.selectMidiOutput (object->getProperty ("outputId").toString().toStdString());
+        publishReady();
+        publishState();
+        return;
     }
 
     if (uiReady)
         publishState();
 }
 
+void MainComponent::publishReady()
+{
+    auto* payload = new juce::DynamicObject();
+    payload->setProperty ("protocolVersion", drift::ui::bridgeProtocolVersion);
+    publishEvent ("app.ready", juce::var { payload });
+}
+
 void MainComponent::publishState()
 {
     const auto state = engine.snapshot();
-    auto* object = new juce::DynamicObject();
-    object->setProperty ("playing", state.transport.playing);
-    object->setProperty ("bpm", state.transport.bpm);
-    object->setProperty ("beatPosition", state.transport.beatPosition);
-    object->setProperty ("bar", state.transport.bar);
-    object->setProperty ("beat", state.transport.beat);
-    object->setProperty (
+    auto* payload = new juce::DynamicObject();
+    payload->setProperty ("playing", state.transport.playing);
+    payload->setProperty ("bpm", state.transport.bpm);
+    payload->setProperty ("beatPosition", state.transport.beatPosition);
+    payload->setProperty ("bar", state.transport.bar);
+    payload->setProperty ("beat", state.transport.beat);
+    payload->setProperty (
         "scheduledEventCount", static_cast<juce::int64> (state.transport.scheduledEventCount));
 
     juce::Array<juce::var> outputs;
@@ -104,12 +113,25 @@ void MainComponent::publishState()
         outputs.add (juce::var { outputObject });
     }
 
-    object->setProperty ("midiOutputs", juce::var { outputs });
-    object->setProperty (
+    payload->setProperty ("midiOutputs", juce::var { outputs });
+    payload->setProperty (
         "selectedMidiOutputId", juce::String { state.midiOutput.selectedOutputId });
-    object->setProperty ("midiStatus", drift::music::midiOutputStatusName (state.midiOutput.status));
-    object->setProperty ("midiError", juce::String { state.midiOutput.errorMessage });
+    payload->setProperty (
+        "midiStatus", drift::music::midiOutputStatusName (state.midiOutput.status));
+    payload->setProperty ("midiError", juce::String { state.midiOutput.errorMessage });
 
-    browser.emitEventIfBrowserIsVisible ("drift.state", juce::var { object });
+    publishEvent ("transport.state", juce::var { payload });
+}
+
+void MainComponent::publishEvent (const juce::String& type, juce::var payload)
+{
+    browser.emitEventIfBrowserIsVisible (
+        "drift.event",
+        drift::ui::makeEventEnvelope (nextEventId(), type, std::move (payload)));
+}
+
+juce::String MainComponent::nextEventId()
+{
+    return "native-" + juce::String { ++eventSequence };
 }
 } // namespace drift::app

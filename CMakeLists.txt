@@ -93,6 +93,8 @@ target_sources(Drift PRIVATE
     Source/App/MainComponent.h
     Source/UI/UiResourceProvider.cpp
     Source/UI/UiResourceProvider.h
+    Source/UI/BridgeProtocol.cpp
+    Source/UI/BridgeProtocol.h
 )
 target_include_directories(Drift PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Source")
 target_compile_definitions(Drift PRIVATE
@@ -123,6 +125,8 @@ add_custom_command(TARGET Drift POST_BUILD
 if(BUILD_TESTING)
     add_executable(DriftTests
         Tests/DriftTests.cpp
+        Source/UI/BridgeProtocol.cpp
+        Source/UI/BridgeProtocol.h
         Source/UI/UiResourceProvider.cpp
         Source/UI/UiResourceProvider.h
     )

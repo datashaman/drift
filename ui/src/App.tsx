@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import {
+  createCommand,
   createTransportBridge,
   initialTransportState,
+  type CommandRejection,
   type TransportBridge,
 } from './bridge/transportBridge'
 
@@ -21,10 +23,16 @@ export function App({ bridge }: AppProps) {
   const transportBridge = useMemo(() => bridge ?? createTransportBridge(), [bridge])
   const [transport, setTransport] = useState(initialTransportState)
   const [tempoDraft, setTempoDraft] = useState(String(initialTransportState.bpm))
+  const [bridgeReady, setBridgeReady] = useState(false)
+  const [lastRejection, setLastRejection] = useState<CommandRejection>()
 
   useEffect(() => {
-    const unsubscribe = transportBridge.subscribe(setTransport)
-    transportBridge.send({ type: 'ui.ready' })
+    const unsubscribe = transportBridge.subscribe((event) => {
+      if (event.type === 'app.ready') setBridgeReady(true)
+      if (event.type === 'transport.state') setTransport(event.payload)
+      if (event.type === 'command.rejected') setLastRejection(event.payload)
+    })
+    transportBridge.send(createCommand({ type: 'app.connect', payload: {} }))
     return unsubscribe
   }, [transportBridge])
 
@@ -33,15 +41,16 @@ export function App({ bridge }: AppProps) {
   }, [transport.bpm])
 
   const toggleTransport = () => {
-    transportBridge.send({
+    transportBridge.send(createCommand({
       type: transport.playing ? 'transport.stop' : 'transport.play',
-    })
+      payload: {},
+    }))
   }
 
   const commitTempo = () => {
     const bpm = Number(tempoDraft)
     if (Number.isFinite(bpm) && bpm >= 40 && bpm <= 240) {
-      transportBridge.send({ type: 'transport.setTempo', bpm })
+      transportBridge.send(createCommand({ type: 'transport.setTempo', payload: { bpm } }))
     } else {
       setTempoDraft(String(Math.round(transport.bpm)))
     }
@@ -58,6 +67,8 @@ export function App({ bridge }: AppProps) {
         ? 'Output error'
         : 'Disconnected'
 
+  const controlsReady = transportBridge.connected && bridgeReady
+
   return (
     <main className={`shell ${transport.playing ? 'is-playing' : 'is-stopped'}`}>
       <header className="masthead">
@@ -69,7 +80,7 @@ export function App({ bridge }: AppProps) {
         <div className="transport" aria-label="Transport controls">
           <button
             className="transport-button"
-            disabled={!transportBridge.connected}
+            disabled={!controlsReady}
             onClick={toggleTransport}
             type="button"
           >
@@ -81,7 +92,7 @@ export function App({ bridge }: AppProps) {
             <span>Tempo</span>
             <input
               aria-label="Tempo in BPM"
-              disabled={!transportBridge.connected}
+              disabled={!controlsReady}
               max="240"
               min="40"
               onBlur={commitTempo}
@@ -100,12 +111,12 @@ export function App({ bridge }: AppProps) {
             <span>MIDI output</span>
             <select
               aria-label="MIDI output"
-              disabled={!transportBridge.connected || transport.midiOutputs.length === 0}
+              disabled={!controlsReady || transport.midiOutputs.length === 0}
               onChange={(event) =>
-                transportBridge.send({
+                transportBridge.send(createCommand({
                   type: 'midi.selectOutput',
-                  outputId: event.target.value,
-                })
+                  payload: { outputId: event.target.value },
+                }))
               }
               value={transport.selectedMidiOutputId}
             >
@@ -147,7 +158,13 @@ export function App({ bridge }: AppProps) {
       <aside className="status" aria-label="Application status" aria-live="polite">
         <div className="status-heading">
           <span className="status-pulse" aria-hidden="true" />
-          <span>{transportBridge.connected ? 'Native engine linked' : 'Browser preview'}</span>
+          <span>
+            {!transportBridge.connected
+              ? 'Browser preview'
+              : bridgeReady
+                ? 'Native engine linked'
+                : 'Connecting to engine'}
+          </span>
         </div>
 
         <div className="musical-position">
@@ -176,6 +193,12 @@ export function App({ bridge }: AppProps) {
           </div>
         </dl>
 
+        {lastRejection && (
+          <div className="bridge-rejection" role="alert">
+            <span>Command rejected · {lastRejection.code}</span>
+            <p>{lastRejection.message}</p>
+          </div>
+        )}
         {transport.midiError && <p className="midi-error">{transport.midiError}</p>}
         <p className="status-note">
           Musical time and MIDI scheduling live in the native engine. Connect the selected output to a synth or DAW to hear the phrase.

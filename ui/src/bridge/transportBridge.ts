@@ -1,12 +1,6 @@
+export const protocolVersion = 1
 export const commandEventId = 'drift.command'
-export const stateEventId = 'drift.state'
-
-export type TransportCommand =
-  | { type: 'ui.ready' }
-  | { type: 'transport.play' }
-  | { type: 'transport.stop' }
-  | { type: 'transport.setTempo'; bpm: number }
-  | { type: 'midi.selectOutput'; outputId: string }
+export const eventEventId = 'drift.event'
 
 export interface MidiOutputInfo {
   id: string
@@ -41,6 +35,44 @@ export const initialTransportState: TransportState = {
   midiError: '',
 }
 
+export type TransportCommand =
+  | { type: 'app.connect'; payload: Record<string, never> }
+  | { type: 'transport.play'; payload: Record<string, never> }
+  | { type: 'transport.stop'; payload: Record<string, never> }
+  | { type: 'transport.setTempo'; payload: { bpm: number } }
+  | { type: 'midi.selectOutput'; payload: { outputId: string } }
+
+export type CommandEnvelope = TransportCommand & {
+  protocolVersion: typeof protocolVersion
+  messageId: string
+}
+
+export interface CommandRejection {
+  commandMessageId: string
+  code: string
+  message: string
+}
+
+export type BridgeEventEnvelope =
+  | {
+      protocolVersion: typeof protocolVersion
+      messageId: string
+      type: 'app.ready'
+      payload: { protocolVersion: typeof protocolVersion }
+    }
+  | {
+      protocolVersion: typeof protocolVersion
+      messageId: string
+      type: 'transport.state'
+      payload: TransportState
+    }
+  | {
+      protocolVersion: typeof protocolVersion
+      messageId: string
+      type: 'command.rejected'
+      payload: CommandRejection
+    }
+
 export interface JuceBackend {
   emitEvent(eventId: string, payload: unknown): void
   addEventListener(eventId: string, listener: (payload: unknown) => void): unknown
@@ -49,8 +81,8 @@ export interface JuceBackend {
 
 export interface TransportBridge {
   readonly connected: boolean
-  send(command: TransportCommand): void
-  subscribe(listener: (state: TransportState) => void): () => void
+  send(command: CommandEnvelope): void
+  subscribe(listener: (event: BridgeEventEnvelope) => void): () => void
 }
 
 declare global {
@@ -59,6 +91,21 @@ declare global {
       backend?: JuceBackend
     }
   }
+}
+
+let commandSequence = 0
+
+export function createCommand(command: TransportCommand): CommandEnvelope {
+  commandSequence += 1
+  return {
+    protocolVersion,
+    messageId: `ui-${commandSequence}`,
+    ...command,
+  } as CommandEnvelope
+}
+
+function isMessageId(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9._:-]{1,64}$/.test(value)
 }
 
 function isTransportState(payload: unknown): payload is TransportState {
@@ -91,6 +138,43 @@ function isTransportState(payload: unknown): payload is TransportState {
   )
 }
 
+function isBridgeEventEnvelope(payload: unknown): payload is BridgeEventEnvelope {
+  if (typeof payload !== 'object' || payload === null) return false
+
+  const envelope = payload as {
+    protocolVersion?: unknown
+    messageId?: unknown
+    type?: unknown
+    payload?: unknown
+  }
+
+  if (envelope.protocolVersion !== protocolVersion || !isMessageId(envelope.messageId)) {
+    return false
+  }
+
+  if (envelope.type === 'app.ready') {
+    return (
+      typeof envelope.payload === 'object' &&
+      envelope.payload !== null &&
+      (envelope.payload as { protocolVersion?: unknown }).protocolVersion === protocolVersion
+    )
+  }
+
+  if (envelope.type === 'transport.state') return isTransportState(envelope.payload)
+
+  if (envelope.type === 'command.rejected') {
+    if (typeof envelope.payload !== 'object' || envelope.payload === null) return false
+    const rejection = envelope.payload as Partial<CommandRejection>
+    return (
+      typeof rejection.commandMessageId === 'string' &&
+      typeof rejection.code === 'string' &&
+      typeof rejection.message === 'string'
+    )
+  }
+
+  return false
+}
+
 export function createTransportBridge(backend?: JuceBackend): TransportBridge {
   const resolvedBackend =
     backend ?? (typeof window === 'undefined' ? undefined : window.__JUCE__?.backend)
@@ -107,8 +191,8 @@ export function createTransportBridge(backend?: JuceBackend): TransportBridge {
     connected: true,
     send: (command) => resolvedBackend.emitEvent(commandEventId, command),
     subscribe: (listener) => {
-      const token = resolvedBackend.addEventListener(stateEventId, (payload) => {
-        if (isTransportState(payload)) listener(payload)
+      const token = resolvedBackend.addEventListener(eventEventId, (payload) => {
+        if (isBridgeEventEnvelope(payload)) listener(payload)
       })
 
       return () => resolvedBackend.removeEventListener(token)

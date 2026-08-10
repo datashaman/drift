@@ -5,6 +5,7 @@
 #include "Music/PhraseScheduler.h"
 #include "Music/Quantizer.h"
 #include "Music/Transport.h"
+#include "UI/BridgeProtocol.h"
 #include "UI/UiResourceProvider.h"
 
 #include <algorithm>
@@ -129,6 +130,60 @@ void expect (bool condition, const std::string& message)
 void expectNear (double actual, double expected, const std::string& message)
 {
     expect (std::abs (actual - expected) < 1.0e-8, message);
+}
+
+bool midiMessagesEqual (const std::vector<drift::music::ScheduledMidiMessage>& left,
+                        const std::vector<drift::music::ScheduledMidiMessage>& right)
+{
+    if (left.size() != right.size())
+        return false;
+
+    for (std::size_t index = 0; index < left.size(); ++index)
+    {
+        const auto& a = left[index];
+        const auto& b = right[index];
+
+        if (a.type != b.type || a.channel != b.channel || a.note != b.note
+            || a.velocity != b.velocity || std::abs (a.beat - b.beat) >= 1.0e-8
+            || std::abs (a.deliveryDelaySeconds - b.deliveryDelaySeconds) >= 1.0e-8)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+juce::var makeObject()
+{
+    return juce::var { new juce::DynamicObject() };
+}
+
+juce::var makeCommandEnvelope (const juce::String& messageId,
+                               const juce::String& type,
+                               juce::var payload,
+                               int version = drift::ui::bridgeProtocolVersion)
+{
+    auto* object = new juce::DynamicObject();
+    object->setProperty ("protocolVersion", version);
+    object->setProperty ("messageId", messageId);
+    object->setProperty ("type", type);
+    object->setProperty ("payload", std::move (payload));
+    return juce::var { object };
+}
+
+juce::var makeTempoPayload (juce::var bpm)
+{
+    auto* object = new juce::DynamicObject();
+    object->setProperty ("bpm", std::move (bpm));
+    return juce::var { object };
+}
+
+juce::var makeOutputPayload (const juce::String& outputId)
+{
+    auto* object = new juce::DynamicObject();
+    object->setProperty ("outputId", outputId);
+    return juce::var { object };
 }
 
 void testUiResourceProvider()
@@ -377,6 +432,130 @@ void testMidiOutputFailureRecovery()
 
     expect (output.selectOutput ("good"), "The app remains usable after a send failure");
 }
+
+void testBridgeRejectsInvalidCommandsBeforeMutation()
+{
+    FakeClock clock;
+    drift::music::RecordingMidiSink sink;
+    drift::engine::TransportEngine engine { clock, sink };
+    auto connectCount = 0;
+    auto outputSelectionCount = 0;
+    const drift::ui::CommandHandlers handlers {
+        [&connectCount] { ++connectCount; },
+        [&engine] { engine.play(); },
+        [&engine] { engine.stop(); },
+        [&engine] (double bpm) { engine.setBpm (bpm); },
+        [&outputSelectionCount] (const std::string&) { ++outputSelectionCount; },
+        [] (const std::string& outputId) { return outputId == "known-output"; },
+    };
+
+    const auto playResult = drift::ui::dispatchCommandEnvelope (
+        makeCommandEnvelope ("ui-play", "transport.play", makeObject()), handlers);
+    expect (playResult.command.has_value(), "A valid versioned Play envelope is accepted");
+    expect (engine.snapshot().playing, "The accepted Play command reaches transport state");
+    const auto scheduledBeforeRejections = sink.messages();
+
+    const auto expectRejected = [&] (juce::var command,
+                                     drift::ui::CommandRejectionCode expectedCode,
+                                     const std::string& message) {
+        const auto result = drift::ui::dispatchCommandEnvelope (command, handlers);
+        expect (result.rejection.has_value(), message);
+        expect (result.rejection && result.rejection->code == expectedCode,
+                message + " uses the structured rejection code");
+    };
+
+    expectRejected (
+        makeCommandEnvelope ("ui-version", "transport.stop", makeObject(), 2),
+        drift::ui::CommandRejectionCode::unsupportedVersion,
+        "An unknown protocol version is rejected");
+    expectRejected (
+        makeCommandEnvelope ("ui-type", "transport.rewind", makeObject()),
+        drift::ui::CommandRejectionCode::unknownCommand,
+        "An unknown command type is rejected");
+    expectRejected (
+        makeCommandEnvelope ("bad message id", "transport.stop", makeObject()),
+        drift::ui::CommandRejectionCode::invalidMessageId,
+        "An invalid message ID is rejected");
+    expectRejected (
+        makeCommandEnvelope ("ui-tempo", "transport.setTempo", makeTempoPayload (300.0)),
+        drift::ui::CommandRejectionCode::outOfRange,
+        "An out-of-range tempo is rejected");
+    expectRejected (
+        makeCommandEnvelope ("ui-output", "midi.selectOutput", makeOutputPayload ("missing")),
+        drift::ui::CommandRejectionCode::unknownId,
+        "An unknown MIDI output ID is rejected");
+
+    auto oversizedPayload = makeObject();
+    oversizedPayload.getDynamicObject()->setProperty (
+        "blob", juce::String::repeatedString ("x", 5000));
+    expectRejected (
+        makeCommandEnvelope ("ui-large", "transport.play", std::move (oversizedPayload)),
+        drift::ui::CommandRejectionCode::payloadTooLarge,
+        "An oversized command payload is rejected");
+
+    expect (engine.snapshot().playing,
+            "Rejected commands cannot stop or otherwise change the running transport");
+    expectNear (engine.snapshot().bpm, 120.0,
+                "Rejected numeric values cannot change authoritative tempo");
+    expect (midiMessagesEqual (sink.messages(), scheduledBeforeRejections),
+            "Rejected commands cannot change scheduled MIDI messages");
+    expect (outputSelectionCount == 0,
+            "An unknown output ID cannot reach the MIDI selection handler");
+}
+
+void testBridgeReconnectPreservesNativePlayback()
+{
+    FakeClock clock;
+    drift::music::RecordingMidiSink sink;
+    drift::engine::TransportEngine engine { clock, sink };
+    auto connectCount = 0;
+    const drift::ui::CommandHandlers handlers {
+        [&connectCount] { ++connectCount; },
+        [&engine] { engine.play(); },
+        [&engine] { engine.stop(); },
+        [&engine] (double bpm) { engine.setBpm (bpm); },
+        {},
+        {},
+    };
+
+    drift::ui::dispatchCommandEnvelope (
+        makeCommandEnvelope ("ui-play", "transport.play", makeObject()), handlers);
+    const auto scheduledBeforeReload = sink.messages();
+    clock.advance (0.75);
+
+    const auto firstConnect = drift::ui::dispatchCommandEnvelope (
+        makeCommandEnvelope ("ui-connect-1", "app.connect", makeObject()), handlers);
+    const auto secondConnect = drift::ui::dispatchCommandEnvelope (
+        makeCommandEnvelope ("ui-connect-2", "app.connect", makeObject()), handlers);
+
+    expect (firstConnect.command.has_value() && secondConnect.command.has_value(),
+            "Every UI load can perform a fresh app.connect handshake");
+    expect (connectCount == 2, "Repeated handshakes are accepted independently");
+    expect (engine.snapshot().playing, "UI reconnect does not stop native playback");
+    expectNear (engine.snapshot().beatPosition, 1.5,
+                "UI reconnect observes ongoing monotonic native position");
+    expect (midiMessagesEqual (sink.messages(), scheduledBeforeReload),
+            "UI reconnect does not alter already-scheduled event timestamps");
+
+    auto* readyPayload = new juce::DynamicObject();
+    readyPayload->setProperty ("protocolVersion", drift::ui::bridgeProtocolVersion);
+    const auto readyEnvelope = drift::ui::makeEventEnvelope (
+        "native-ready", "app.ready", juce::var { readyPayload });
+    expect (static_cast<int> (readyEnvelope.getProperty ("protocolVersion", 0))
+                == drift::ui::bridgeProtocolVersion,
+            "Native app.ready uses the agreed protocol version");
+    expect (readyEnvelope.getProperty ("type", juce::var {}).toString() == "app.ready",
+            "Native app.ready uses the versioned event envelope");
+
+    const drift::ui::CommandRejection rejection {
+        "ui-invalid",
+        drift::ui::CommandRejectionCode::unknownCommand,
+        "The command type is unknown",
+    };
+    const auto rejectionPayload = drift::ui::makeCommandRejectedPayload (rejection);
+    expect (rejectionPayload.getProperty ("code", juce::var {}).toString() == "unknown_command",
+            "Native command.rejected exposes a stable structured error code");
+}
 } // namespace
 
 int main()
@@ -389,6 +568,8 @@ int main()
     testMidiOutputSelectionAndReplacement();
     testMidiOutputRoutesTimestampedPhrase();
     testMidiOutputFailureRecovery();
+    testBridgeRejectsInvalidCommandsBeforeMutation();
+    testBridgeReconnectPreservesNativePlayback();
 
     if (failures == 0)
         std::cout << "All Drift native tests passed\n";
