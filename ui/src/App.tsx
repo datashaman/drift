@@ -47,6 +47,17 @@ export function App({ bridge }: AppProps) {
     }
   }
 
+  const selectedMidiOutput = transport.midiOutputs.find(
+    (output) => output.id === transport.selectedMidiOutputId,
+  )
+
+  const midiSummary =
+    transport.midiStatus === 'connected' && selectedMidiOutput
+      ? selectedMidiOutput.name
+      : transport.midiStatus === 'error'
+        ? 'Output error'
+        : 'Disconnected'
+
   return (
     <main className={`shell ${transport.playing ? 'is-playing' : 'is-stopped'}`}>
       <header className="masthead">
@@ -84,6 +95,30 @@ export function App({ bridge }: AppProps) {
             />
             <span>BPM</span>
           </label>
+
+          <label className="midi-output-control">
+            <span>MIDI output</span>
+            <select
+              aria-label="MIDI output"
+              disabled={!transportBridge.connected || transport.midiOutputs.length === 0}
+              onChange={(event) =>
+                transportBridge.send({
+                  type: 'midi.selectOutput',
+                  outputId: event.target.value,
+                })
+              }
+              value={transport.selectedMidiOutputId}
+            >
+              <option value="">
+                {transport.midiOutputs.length === 0 ? 'No outputs found' : 'Choose output'}
+              </option>
+              {transport.midiOutputs.map((output) => (
+                <option key={output.id} value={output.id}>
+                  {output.name}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
       </header>
 
@@ -102,7 +137,11 @@ export function App({ bridge }: AppProps) {
           </div>
         ))}
 
-        <p className="field-note">Bass phrase online. Three roles queued.</p>
+        <p className="field-note">
+          {transport.midiStatus === 'connected'
+            ? 'Bass phrase online. Three roles queued.'
+            : 'Select a MIDI output to hear the bass phrase.'}
+        </p>
       </section>
 
       <aside className="status" aria-label="Application status" aria-live="polite">
@@ -133,12 +172,13 @@ export function App({ bridge }: AppProps) {
           </div>
           <div>
             <dt>MIDI</dt>
-            <dd>Recording sink</dd>
+            <dd>{midiSummary}</dd>
           </div>
         </dl>
 
-        <p>
-          Musical time and phrase scheduling live in the native engine. This interface only sends intent and displays its state.
+        {transport.midiError && <p className="midi-error">{transport.midiError}</p>}
+        <p className="status-note">
+          Musical time and MIDI scheduling live in the native engine. Connect the selected output to a synth or DAW to hear the phrase.
         </p>
       </aside>
     </main>

@@ -28,6 +28,7 @@ public:
     void play();
     void stop();
     bool setBpm (double bpm);
+    void reschedule();
     void tick();
 
     EngineSnapshot snapshot() const;

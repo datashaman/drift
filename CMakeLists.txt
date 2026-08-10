@@ -60,6 +60,8 @@ add_library(DriftEngine STATIC
     Source/Engine/TransportEngine.h
     Source/Music/MidiSink.cpp
     Source/Music/MidiSink.h
+    Source/Music/MidiOutput.cpp
+    Source/Music/MidiOutput.h
     Source/Music/Phrase.cpp
     Source/Music/Phrase.h
     Source/Music/PhraseScheduler.cpp
@@ -84,6 +86,8 @@ juce_add_gui_app(Drift
 target_sources(Drift PRIVATE
     Source/Engine/EngineController.cpp
     Source/Engine/EngineController.h
+    Source/Music/JuceMidiOutput.cpp
+    Source/Music/JuceMidiOutput.h
     Source/App/Main.cpp
     Source/App/MainComponent.cpp
     Source/App/MainComponent.h
@@ -98,6 +102,7 @@ target_compile_definitions(Drift PRIVATE
 target_link_libraries(Drift
     PRIVATE
         DriftEngine
+        juce::juce_audio_devices
         juce::juce_gui_extra
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags

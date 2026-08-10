@@ -19,6 +19,7 @@ struct ScheduledMidiMessage
     int note = 60;
     int velocity = 0;
     double beat = 0.0;
+    double deliveryDelaySeconds = 0.0;
 };
 
 class MidiSink

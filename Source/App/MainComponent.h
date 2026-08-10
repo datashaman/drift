@@ -22,5 +22,6 @@ private:
     drift::engine::EngineController engine;
     juce::WebBrowserComponent browser;
     bool uiReady = false;
+    int midiRefreshCountdown = 30;
 };
 } // namespace drift::app

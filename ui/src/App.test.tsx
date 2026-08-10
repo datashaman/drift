@@ -100,10 +100,54 @@ describe('Drift transport interface', () => {
     expect(received.bar).toBe(4)
   })
 
+  it('selects opaque MIDI output IDs and renders connection failures', () => {
+    const bridge = new FakeTransportBridge()
+    render(<App bridge={bridge} />)
+
+    act(() => {
+      bridge.publish({
+        ...initialTransportState,
+        midiOutputs: [
+          { id: 'runtime:42', name: 'Studio Synth' },
+          { id: 'runtime:99', name: 'Loopback Bus' },
+        ],
+      })
+    })
+
+    const outputSelect = screen.getByLabelText('MIDI output')
+    fireEvent.change(outputSelect, { target: { value: 'runtime:42' } })
+    expect(bridge.commands).toContainEqual({
+      type: 'midi.selectOutput',
+      outputId: 'runtime:42',
+    })
+
+    act(() => {
+      bridge.publish({
+        ...initialTransportState,
+        midiOutputs: [{ id: 'runtime:42', name: 'Studio Synth' }],
+        selectedMidiOutputId: 'runtime:42',
+        midiStatus: 'connected',
+      })
+    })
+    expect(screen.getAllByText('Studio Synth')).toHaveLength(2)
+    expect(screen.getByText(/bass phrase online/i)).toBeTruthy()
+
+    act(() => {
+      bridge.publish({
+        ...initialTransportState,
+        midiStatus: 'error',
+        midiError: 'Could not open the selected MIDI output',
+      })
+    })
+    expect(screen.getByText('Output error')).toBeTruthy()
+    expect(screen.getByText('Could not open the selected MIDI output')).toBeTruthy()
+  })
+
   it('disables transport controls outside the native host', () => {
     render(<App bridge={createTransportBridge(undefined)} />)
 
     expect((screen.getByRole('button', { name: /play/i }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByLabelText('MIDI output') as HTMLSelectElement).disabled).toBe(true)
     expect(screen.getByText('Browser preview')).toBeTruthy()
   })
 })

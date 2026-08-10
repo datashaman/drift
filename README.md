@@ -84,7 +84,7 @@ Drift is in the design and initial implementation phase. The first development b
 5. [Prove transport stability under simulated UI stress](https://github.com/datashaman/drift/issues/5)
 6. [Validate ten-minute playback through a real MIDI device](https://github.com/datashaman/drift/issues/6)
 
-The native shell now connects React Play, Stop, and BPM controls to a native-owned monotonic transport and one hard-coded looping bass phrase. Events are currently written to a recording MIDI sink; selectable real MIDI output and the interactive phrase world arrive in later slices.
+The native shell now connects React Play, Stop, BPM, and MIDI-output controls to a native-owned monotonic transport and one hard-coded looping bass phrase. Drift schedules timestamped events to the selected external MIDI destination and executes a panic path on stop, output change, failure, and shutdown. The interactive phrase world arrives in later slices.
 
 ## Development
 
@@ -118,6 +118,7 @@ Release builds use the equivalent `release` preset.
 - [Product requirements](docs/PRD.md)
 - [Technical design](docs/TECHNICAL-DESIGN.md)
 - [Implementation plan](docs/IMPLEMENTATION-PLAN.md)
+- [MIDI output smoke test](docs/MIDI-SMOKE-TEST.md)
 - [Open issues](https://github.com/datashaman/drift/issues)
 
 ## Success criteria

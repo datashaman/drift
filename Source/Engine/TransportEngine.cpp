@@ -1,7 +1,41 @@
 #include "Engine/TransportEngine.h"
 
+#include <algorithm>
+
 namespace drift::engine
 {
+namespace
+{
+class DeliveryTimingSink final : public music::MidiSink
+{
+public:
+    DeliveryTimingSink (music::MidiSink& targetIn,
+                        double currentBeatIn,
+                        double secondsPerBeatIn)
+        : target (targetIn),
+          currentBeat (currentBeatIn),
+          secondsPerBeat (secondsPerBeatIn)
+    {
+    }
+
+    void schedule (const music::ScheduledMidiMessage& message) override
+    {
+        auto timestamped = message;
+        timestamped.deliveryDelaySeconds = std::max (
+            0.0, (message.beat - currentBeat) * secondsPerBeat);
+        target.schedule (timestamped);
+    }
+
+    void clear() override { target.clear(); }
+    std::size_t messageCount() const override { return target.messageCount(); }
+
+private:
+    music::MidiSink& target;
+    double currentBeat;
+    double secondsPerBeat;
+};
+} // namespace
+
 TransportEngine::TransportEngine (Clock& clockIn, music::MidiSink& sinkIn)
     : sink (sinkIn),
       transport (clockIn),
@@ -28,7 +62,25 @@ void TransportEngine::stop()
 
 bool TransportEngine::setBpm (double bpm)
 {
-    return transport.setBpm (bpm);
+    if (! transport.setBpm (bpm))
+        return false;
+
+    if (transport.snapshot().playing)
+    {
+        sink.clear();
+        reschedule();
+    }
+
+    return true;
+}
+
+void TransportEngine::reschedule()
+{
+    const auto state = transport.snapshot();
+    scheduledThroughBeat = state.beatPosition;
+
+    if (state.playing)
+        tick();
 }
 
 void TransportEngine::tick()
@@ -45,7 +97,8 @@ void TransportEngine::tick()
     if (horizonBeat <= rangeStart)
         return;
 
-    scheduler.scheduleRange (phrase, rangeStart, horizonBeat, sink);
+    DeliveryTimingSink timingSink { sink, state.beatPosition, 60.0 / state.bpm };
+    scheduler.scheduleRange (phrase, rangeStart, horizonBeat, timingSink);
     scheduledThroughBeat = horizonBeat;
 }
 
