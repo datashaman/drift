@@ -2,7 +2,8 @@
 
 #include "Engine/Clock.h"
 #include "Engine/TransportEngine.h"
-#include "Music/MidiSink.h"
+#include "Music/JuceMidiOutput.h"
+#include "Music/MidiOutput.h"
 
 #include <juce_core/juce_core.h>
 
@@ -10,6 +11,12 @@
 
 namespace drift::engine
 {
+struct ControllerSnapshot
+{
+    EngineSnapshot transport;
+    music::MidiOutputSnapshot midiOutput;
+};
+
 class EngineController final : private juce::HighResolutionTimer
 {
 public:
@@ -19,14 +26,17 @@ public:
     void play();
     void stop();
     bool setBpm (double bpm);
-    EngineSnapshot snapshot() const;
+    bool selectMidiOutput (const std::string& outputId);
+    void refreshMidiOutputs();
+    ControllerSnapshot snapshot() const;
 
 private:
     void hiResTimerCallback() override;
 
     mutable std::mutex mutex;
     SteadyClock clock;
-    music::RecordingMidiSink sink;
+    music::JuceMidiOutputProvider midiOutputProvider;
+    music::MidiOutputService midiOutput;
     TransportEngine engine;
 };
 } // namespace drift::engine

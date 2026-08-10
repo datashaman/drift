@@ -75,13 +75,15 @@ body {
 }
 
 .transport-button:disabled,
-.tempo-control input:disabled {
+.tempo-control input:disabled,
+.midi-output-control select:disabled {
   cursor: not-allowed;
   opacity: 0.42;
 }
 
 .transport-button:focus-visible,
-.tempo-control input:focus-visible {
+.tempo-control input:focus-visible,
+.midi-output-control select:focus-visible {
   outline: 2px solid var(--sun);
   outline-offset: 3px;
 }
@@ -108,6 +110,28 @@ body {
   font: inherit;
   font-size: 13px;
   text-align: center;
+}
+
+.midi-output-control {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.midi-output-control select {
+  width: 180px;
+  padding: 8px 28px 8px 8px;
+  border: 1px solid rgba(238, 241, 232, 0.22);
+  border-radius: 4px;
+  color: var(--ink);
+  background: rgba(12, 18, 38, 0.8);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .eyebrow,
@@ -328,9 +352,14 @@ h1 {
   text-align: right;
 }
 
-.status p {
+.status-note {
   margin: auto 0 0;
   color: rgba(158, 169, 191, 0.72);
+}
+
+.status .midi-error {
+  margin: 0 0 16px;
+  color: var(--coral);
 }
 
 @keyframes drift {

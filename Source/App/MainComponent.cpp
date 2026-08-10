@@ -36,6 +36,12 @@ void MainComponent::resized()
 
 void MainComponent::timerCallback()
 {
+    if (--midiRefreshCountdown <= 0)
+    {
+        engine.refreshMidiOutputs();
+        midiRefreshCountdown = 30;
+    }
+
     if (uiReady)
         publishState();
 }
@@ -68,6 +74,10 @@ void MainComponent::handleCommand (juce::var command)
         if (bpm.isInt() || bpm.isInt64() || bpm.isDouble())
             engine.setBpm (static_cast<double> (bpm));
     }
+    else if (type == "midi.selectOutput")
+    {
+        engine.selectMidiOutput (object->getProperty ("outputId").toString().toStdString());
+    }
 
     if (uiReady)
         publishState();
@@ -77,12 +87,28 @@ void MainComponent::publishState()
 {
     const auto state = engine.snapshot();
     auto* object = new juce::DynamicObject();
-    object->setProperty ("playing", state.playing);
-    object->setProperty ("bpm", state.bpm);
-    object->setProperty ("beatPosition", state.beatPosition);
-    object->setProperty ("bar", state.bar);
-    object->setProperty ("beat", state.beat);
-    object->setProperty ("scheduledEventCount", static_cast<juce::int64> (state.scheduledEventCount));
+    object->setProperty ("playing", state.transport.playing);
+    object->setProperty ("bpm", state.transport.bpm);
+    object->setProperty ("beatPosition", state.transport.beatPosition);
+    object->setProperty ("bar", state.transport.bar);
+    object->setProperty ("beat", state.transport.beat);
+    object->setProperty (
+        "scheduledEventCount", static_cast<juce::int64> (state.transport.scheduledEventCount));
+
+    juce::Array<juce::var> outputs;
+    for (const auto& output : state.midiOutput.outputs)
+    {
+        auto* outputObject = new juce::DynamicObject();
+        outputObject->setProperty ("id", juce::String { output.id });
+        outputObject->setProperty ("name", juce::String { output.name });
+        outputs.add (juce::var { outputObject });
+    }
+
+    object->setProperty ("midiOutputs", juce::var { outputs });
+    object->setProperty (
+        "selectedMidiOutputId", juce::String { state.midiOutput.selectedOutputId });
+    object->setProperty ("midiStatus", drift::music::midiOutputStatusName (state.midiOutput.status));
+    object->setProperty ("midiError", juce::String { state.midiOutput.errorMessage });
 
     browser.emitEventIfBrowserIsVisible ("drift.state", juce::var { object });
 }

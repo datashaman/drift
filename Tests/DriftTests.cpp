@@ -1,6 +1,7 @@
 #include "Engine/Clock.h"
 #include "Engine/TransportEngine.h"
 #include "Music/MidiSink.h"
+#include "Music/MidiOutput.h"
 #include "Music/PhraseScheduler.h"
 #include "Music/Quantizer.h"
 #include "Music/Transport.h"
@@ -9,7 +10,9 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <memory>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -21,6 +24,95 @@ public:
 
 private:
     double currentTime = 0.0;
+};
+
+struct FakeMidiDeviceState
+{
+    std::string id;
+    std::vector<drift::music::ScheduledMidiMessage> messages;
+    bool failScheduling = false;
+};
+
+class FakeMidiOutputDevice final : public drift::music::MidiOutputDevice
+{
+public:
+    FakeMidiOutputDevice (std::shared_ptr<FakeMidiDeviceState> stateIn,
+                          std::vector<std::string>& actionsIn)
+        : state (std::move (stateIn)), actions (actionsIn)
+    {
+    }
+
+    ~FakeMidiOutputDevice() override
+    {
+        actions.push_back (state->id + ":close");
+    }
+
+    bool schedule (const drift::music::ScheduledMidiMessage& message) override
+    {
+        actions.push_back (state->id + ":schedule");
+
+        if (state->failScheduling)
+            return false;
+
+        state->messages.push_back (message);
+        return true;
+    }
+
+    void clearPendingMessages() override
+    {
+        actions.push_back (state->id + ":clear");
+    }
+
+    void panic() override
+    {
+        actions.push_back (state->id + ":panic");
+    }
+
+private:
+    std::shared_ptr<FakeMidiDeviceState> state;
+    std::vector<std::string>& actions;
+};
+
+class FakeMidiOutputProvider final : public drift::music::MidiOutputProvider
+{
+public:
+    std::vector<drift::music::MidiOutputInfo> availableOutputs() override
+    {
+        return outputs;
+    }
+
+    std::unique_ptr<drift::music::MidiOutputDevice> openOutput (
+        const std::string& outputId) override
+    {
+        actions.push_back ("open:" + outputId);
+
+        if (outputId == failingOpenId)
+            return {};
+
+        return std::make_unique<FakeMidiOutputDevice> (stateFor (outputId), actions);
+    }
+
+    std::shared_ptr<FakeMidiDeviceState> stateFor (const std::string& outputId)
+    {
+        const auto existing = std::find_if (states.begin(), states.end(), [&outputId] (const auto& state) {
+            return state->id == outputId;
+        });
+
+        if (existing != states.end())
+            return *existing;
+
+        auto state = std::make_shared<FakeMidiDeviceState>();
+        state->id = outputId;
+        states.push_back (state);
+        return state;
+    }
+
+    std::vector<drift::music::MidiOutputInfo> outputs;
+    std::vector<std::string> actions;
+    std::string failingOpenId;
+
+private:
+    std::vector<std::shared_ptr<FakeMidiDeviceState>> states;
 };
 
 int failures = 0;
@@ -173,6 +265,118 @@ void testEngineIsIndependentOfUiUpdateTiming()
     expect (sink.messageCount() == 0, "Stop clears all future scheduled messages");
     expect (sink.activeNoteCount() == 0, "Stop leaves no active notes in the recording sink");
 }
+
+void testMidiOutputSelectionAndReplacement()
+{
+    FakeMidiOutputProvider provider;
+    provider.outputs = { { "opaque-a", "Studio Synth" }, { "opaque-b", "Loopback Bus" } };
+    drift::music::MidiOutputService output { provider };
+
+    auto state = output.snapshot();
+    expect (state.outputs.size() == 2, "MIDI discovery retains opaque IDs and display names");
+    expect (output.selectOutput ("opaque-a"), "An available MIDI output can be selected");
+    expect (output.snapshot().status == drift::music::MidiOutputStatus::connected,
+            "Selecting an output reports a connected state");
+
+    provider.actions.clear();
+    expect (output.selectOutput ("opaque-b"), "A second MIDI output can replace the first");
+    expect (provider.actions == std::vector<std::string> {
+                "opaque-a:clear",
+                "opaque-a:panic",
+                "opaque-a:close",
+                "open:opaque-b",
+            },
+            "Output replacement clears, panics, and closes before opening the new device");
+
+    provider.actions.clear();
+    output.clear();
+    expect (provider.actions == std::vector<std::string> {
+                "opaque-b:clear",
+                "opaque-b:panic",
+            },
+            "Transport stop executes panic without closing the selected output");
+
+    provider.actions.clear();
+    output.shutdown();
+    expect (provider.actions == std::vector<std::string> {
+                "opaque-b:clear",
+                "opaque-b:panic",
+                "opaque-b:close",
+            },
+            "Application shutdown silences and closes the selected output");
+}
+
+void testMidiOutputRoutesTimestampedPhrase()
+{
+    FakeClock clock;
+    FakeMidiOutputProvider provider;
+    provider.outputs = { { "synth", "Test Synth" }, { "backup", "Backup Synth" } };
+    drift::music::MidiOutputService output { provider };
+    drift::engine::TransportEngine engine { clock, output };
+
+    expect (output.selectOutput ("synth"), "The fake synth opens for routing");
+    engine.play();
+
+    const auto deviceState = provider.stateFor ("synth");
+    expect (deviceState->messages.size() == 2,
+            "Starting transport routes the first note-on and note-off to the output");
+    expect (deviceState->messages[0].type == drift::music::MidiMessageType::noteOn,
+            "The routed phrase begins with note-on");
+    expect (deviceState->messages[1].type == drift::music::MidiMessageType::noteOff,
+            "The routed phrase includes its paired note-off");
+    expectNear (deviceState->messages[0].deliveryDelaySeconds, 0.0,
+                "The first note is delivered immediately");
+    expectNear (deviceState->messages[1].deliveryDelaySeconds, 0.375,
+                "The note-off receives a tempo-derived delivery timestamp");
+
+    expect (output.selectOutput ("backup"), "Playback can move to a replacement output");
+    engine.reschedule();
+    const auto replacementState = provider.stateFor ("backup");
+    expect (replacementState->messages.size() == 2,
+            "The replacement output receives a freshly timestamped note pair");
+
+    provider.actions.clear();
+    engine.stop();
+    expect (output.messageCount() == 0, "Stop clears the scheduled-message count");
+    expect (provider.actions == std::vector<std::string> {
+                "backup:clear",
+                "backup:panic",
+            },
+            "Stopping routed playback clears pending events and executes panic");
+}
+
+void testMidiOutputFailureRecovery()
+{
+    FakeMidiOutputProvider provider;
+    provider.outputs = { { "good", "Good Output" }, { "bad", "Broken Output" } };
+    provider.failingOpenId = "bad";
+    drift::music::MidiOutputService output { provider };
+
+    expect (! output.selectOutput ("missing"), "An unavailable runtime ID is rejected");
+    expect (output.snapshot().status == drift::music::MidiOutputStatus::error,
+            "A missing output reports an error state");
+    expect (! output.selectOutput ("bad"), "A device open failure is recoverable");
+    expect (output.snapshot().errorMessage == "Could not open the selected MIDI output",
+            "An open failure exposes a useful error message");
+
+    expect (output.selectOutput ("good"), "The app can select another output after failure");
+    expect (output.snapshot().errorMessage.empty(), "A successful selection clears the prior error");
+
+    provider.actions.clear();
+    provider.stateFor ("good")->failScheduling = true;
+    output.schedule ({ drift::music::MidiMessageType::noteOn, 1, 60, 100, 0.0, 0.01 });
+    expect (output.snapshot().status == drift::music::MidiOutputStatus::error,
+            "A send failure disconnects the device and reports an error");
+    expect (provider.actions == std::vector<std::string> {
+                "good:schedule",
+                "good:clear",
+                "good:panic",
+                "good:close",
+            },
+            "A send failure performs best-effort panic before closing the device");
+
+    expect (output.selectOutput ("good"), "The app remains usable after a send failure");
+}
 } // namespace
 
 int main()
@@ -182,6 +386,9 @@ int main()
     testQuantizationBoundaries();
     testPhraseSchedulingAcrossLoopAndBar();
     testEngineIsIndependentOfUiUpdateTiming();
+    testMidiOutputSelectionAndReplacement();
+    testMidiOutputRoutesTimestampedPhrase();
+    testMidiOutputFailureRecovery();
 
     if (failures == 0)
         std::cout << "All Drift native tests passed\n";

@@ -5,7 +5,8 @@
 namespace drift::engine
 {
 EngineController::EngineController()
-    : engine (clock, sink)
+    : midiOutput (midiOutputProvider),
+      engine (clock, midiOutput)
 {
     startTimer (2);
 }
@@ -13,6 +14,8 @@ EngineController::EngineController()
 EngineController::~EngineController()
 {
     stopTimer();
+    const std::scoped_lock lock { mutex };
+    midiOutput.shutdown();
 }
 
 void EngineController::play()
@@ -33,10 +36,31 @@ bool EngineController::setBpm (double bpm)
     return engine.setBpm (bpm);
 }
 
-EngineSnapshot EngineController::snapshot() const
+bool EngineController::selectMidiOutput (const std::string& outputId)
 {
     const std::scoped_lock lock { mutex };
-    return engine.snapshot();
+    const auto before = midiOutput.snapshot();
+    const auto selected = midiOutput.selectOutput (outputId);
+    const auto changed = selected
+                         && (before.selectedOutputId != outputId
+                             || before.status != music::MidiOutputStatus::connected);
+
+    if (changed && ! outputId.empty())
+        engine.reschedule();
+
+    return selected;
+}
+
+void EngineController::refreshMidiOutputs()
+{
+    const std::scoped_lock lock { mutex };
+    midiOutput.refreshOutputs();
+}
+
+ControllerSnapshot EngineController::snapshot() const
+{
+    const std::scoped_lock lock { mutex };
+    return { engine.snapshot(), midiOutput.snapshot() };
 }
 
 void EngineController::hiResTimerCallback()

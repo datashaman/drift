@@ -6,6 +6,14 @@ export type TransportCommand =
   | { type: 'transport.play' }
   | { type: 'transport.stop' }
   | { type: 'transport.setTempo'; bpm: number }
+  | { type: 'midi.selectOutput'; outputId: string }
+
+export interface MidiOutputInfo {
+  id: string
+  name: string
+}
+
+export type MidiOutputStatus = 'disconnected' | 'connected' | 'error'
 
 export interface TransportState {
   playing: boolean
@@ -14,6 +22,10 @@ export interface TransportState {
   bar: number
   beat: number
   scheduledEventCount: number
+  midiOutputs: MidiOutputInfo[]
+  selectedMidiOutputId: string
+  midiStatus: MidiOutputStatus
+  midiError: string
 }
 
 export const initialTransportState: TransportState = {
@@ -23,6 +35,10 @@ export const initialTransportState: TransportState = {
   bar: 1,
   beat: 1,
   scheduledEventCount: 0,
+  midiOutputs: [],
+  selectedMidiOutputId: '',
+  midiStatus: 'disconnected',
+  midiError: '',
 }
 
 export interface JuceBackend {
@@ -49,13 +65,29 @@ function isTransportState(payload: unknown): payload is TransportState {
   if (typeof payload !== 'object' || payload === null) return false
 
   const state = payload as Partial<TransportState>
+  const midiOutputsAreValid =
+    Array.isArray(state.midiOutputs) &&
+    state.midiOutputs.every(
+      (output) =>
+        typeof output === 'object' &&
+        output !== null &&
+        typeof output.id === 'string' &&
+        typeof output.name === 'string',
+    )
+
   return (
     typeof state.playing === 'boolean' &&
     typeof state.bpm === 'number' &&
     typeof state.beatPosition === 'number' &&
     typeof state.bar === 'number' &&
     typeof state.beat === 'number' &&
-    typeof state.scheduledEventCount === 'number'
+    typeof state.scheduledEventCount === 'number' &&
+    midiOutputsAreValid &&
+    typeof state.selectedMidiOutputId === 'string' &&
+    (state.midiStatus === 'disconnected' ||
+      state.midiStatus === 'connected' ||
+      state.midiStatus === 'error') &&
+    typeof state.midiError === 'string'
   )
 }
 
