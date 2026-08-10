@@ -56,6 +56,8 @@ add_custom_target(DriftUIBundle DEPENDS ${DRIFT_UI_OUTPUTS})
 add_library(DriftEngine STATIC
     Source/Engine/Clock.cpp
     Source/Engine/Clock.h
+    Source/Engine/EngineCommandQueue.cpp
+    Source/Engine/EngineCommandQueue.h
     Source/Engine/SpatialWorld.cpp
     Source/Engine/SpatialWorld.h
     Source/Engine/TransportEngine.cpp

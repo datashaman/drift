@@ -41,6 +41,7 @@ struct SimulationResult
     bool watermarkMovedBackward = false;
     int uiStallCount = 0;
     int uiObservationCount = 0;
+    int dragMoveCount = 0;
 };
 
 juce::var makeConnectCommand (int sequence)
@@ -60,7 +61,14 @@ SimulationResult runSimulation (bool stressUi)
     drift::music::RecordingMidiSink sink;
     drift::engine::TransportEngine engine { clock, sink };
     const drift::ui::CommandHandlers handlers {
-        [&engine] { engine.recordBridgeReconnect(); },
+        [&engine] {
+            engine.endAllPhraseDrags();
+            engine.recordBridgeReconnect();
+        },
+        {},
+        {},
+        {},
+        {},
         {},
         {},
         {},
@@ -78,6 +86,22 @@ SimulationResult runSimulation (bool stressUi)
     {
         const auto now = static_cast<double> (tick) * engineTickSeconds;
         clock.set (now);
+
+        if (stressUi)
+        {
+            const auto dragPhase = tick % 3000;
+            if (dragPhase == 1)
+                engine.beginPhraseDrag ("bass");
+            else if (dragPhase > 1 && dragPhase < 1000)
+            {
+                const auto movement = static_cast<double> (dragPhase) / 1000.0;
+                if (engine.moveDraggedPhrase ("bass", { movement, 1.0 - movement }))
+                    ++result.dragMoveCount;
+            }
+            else if (dragPhase == 1000)
+                engine.endPhraseDrag ("bass");
+        }
+
         engine.tick();
 
         const auto state = engine.snapshot();
@@ -249,6 +273,8 @@ int main()
                  }),
              "a phrase escaped normalized world bounds during the stress run");
     require (stressed.uiStallCount >= 10, "the harness did not introduce enough UI stalls");
+    require (stressed.dragMoveCount > 90000,
+             "the harness did not generate sustained drag pressure");
 
     std::cout << std::fixed << std::setprecision (9)
               << "Drift deterministic timing stress report\n"
@@ -257,6 +283,7 @@ int main()
               << "Engine ticks: " << totalEngineTicks << '\n'
               << "UI stalls: " << stressed.uiStallCount << '\n'
               << "UI observations: " << stressed.uiObservationCount << '\n'
+              << "Drag moves: " << stressed.dragMoveCount << '\n'
               << "Bridge reconnects: "
               << stressed.snapshot.diagnostics.bridgeReconnectCount << '\n'
               << "Physics steps: " << stressed.snapshot.diagnostics.physicsStepCount << '\n'

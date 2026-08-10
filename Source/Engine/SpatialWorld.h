@@ -15,6 +15,7 @@ struct PhraseBody
     music::NormalizedVelocity velocity;
     double radius = 0.045;
     double mass = 1.0;
+    bool dragged = false;
 };
 
 struct SpatialWorldDiagnostics
@@ -33,6 +34,12 @@ public:
     SpatialWorld (std::vector<PhraseBody> bodiesIn, double initialTimeSeconds);
 
     void advanceTo (double nowSeconds);
+    bool beginDrag (const std::string& phraseId);
+    bool moveDraggedPhrase (const std::string& phraseId,
+                            music::NormalizedPosition position);
+    bool endDrag (const std::string& phraseId);
+    void endAllDrags();
+    bool containsPhrase (const std::string& phraseId) const noexcept;
 
     const std::vector<PhraseBody>& bodies() const noexcept;
     const SpatialWorldDiagnostics& diagnostics() const noexcept;
@@ -40,6 +47,7 @@ public:
 
 private:
     void integrateStep();
+    PhraseBody* findBody (const std::string& phraseId) noexcept;
 
     std::vector<PhraseBody> phraseBodies;
     double lastUpdateSeconds = 0.0;

@@ -64,6 +64,62 @@ void SpatialWorld::advanceTo (double nowSeconds)
     }
 }
 
+bool SpatialWorld::beginDrag (const std::string& phraseId)
+{
+    auto* body = findBody (phraseId);
+    if (body == nullptr || body->dragged)
+        return false;
+
+    body->dragged = true;
+    ++worldRevision;
+    return true;
+}
+
+bool SpatialWorld::moveDraggedPhrase (const std::string& phraseId,
+                                      music::NormalizedPosition position)
+{
+    auto* body = findBody (phraseId);
+    if (body == nullptr || ! body->dragged)
+        return false;
+
+    const auto minimum = std::clamp (body->radius, 0.0, 0.5);
+    const auto maximum = 1.0 - minimum;
+    body->position.x = std::clamp (position.x, minimum, maximum);
+    body->position.y = std::clamp (position.y, minimum, maximum);
+    ++worldRevision;
+    return true;
+}
+
+bool SpatialWorld::endDrag (const std::string& phraseId)
+{
+    auto* body = findBody (phraseId);
+    if (body == nullptr || ! body->dragged)
+        return false;
+
+    body->dragged = false;
+    ++worldRevision;
+    return true;
+}
+
+void SpatialWorld::endAllDrags()
+{
+    for (auto& body : phraseBodies)
+    {
+        if (! body.dragged)
+            continue;
+
+        body.dragged = false;
+        ++worldRevision;
+    }
+}
+
+bool SpatialWorld::containsPhrase (const std::string& phraseId) const noexcept
+{
+    return std::any_of (phraseBodies.begin(), phraseBodies.end(), [&phraseId] (const auto& body) {
+        return body.phraseId == phraseId;
+    });
+}
+
 const std::vector<PhraseBody>& SpatialWorld::bodies() const noexcept
 {
     return phraseBodies;
@@ -83,12 +139,24 @@ void SpatialWorld::integrateStep()
 {
     for (auto& body : phraseBodies)
     {
+        if (body.dragged)
+            continue;
+
         integrateAxis (body.position.x, body.velocity.x, body.radius);
         integrateAxis (body.position.y, body.velocity.y, body.radius);
     }
 
     ++worldRevision;
     ++worldDiagnostics.physicsStepCount;
+}
+
+PhraseBody* SpatialWorld::findBody (const std::string& phraseId) noexcept
+{
+    const auto body = std::find_if (
+        phraseBodies.begin(), phraseBodies.end(), [&phraseId] (const auto& candidate) {
+            return candidate.phraseId == phraseId;
+        });
+    return body == phraseBodies.end() ? nullptr : &*body;
 }
 
 std::vector<PhraseBody> makePhraseBodies (const std::vector<music::Phrase>& phrases)
@@ -104,6 +172,7 @@ std::vector<PhraseBody> makePhraseBodies (const std::vector<music::Phrase>& phra
             phrase.velocity,
             phrase.radius,
             phrase.mass,
+            false,
         });
     }
 

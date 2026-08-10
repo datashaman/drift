@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { App } from './App'
 import {
@@ -56,6 +56,11 @@ function worldEvent(
         physicsCatchUpLimitHitCount: 0,
         droppedSnapshotCount: 112,
         maximumSnapshotIntervalMs: 34.2,
+        commandQueueDepth: 2,
+        maximumCommandQueueDepth: 7,
+        coalescedMoveCount: 12,
+        rejectedCommandCount: 1,
+        commandPressureEventCount: 0,
       },
       phrases: [
         {
@@ -68,6 +73,7 @@ function worldEvent(
           velocity: { x: -0.055, y: -0.035 },
           radius: 0.045,
           mass: 1.1,
+          dragged: false,
           playing: true,
         },
         {
@@ -80,6 +86,7 @@ function worldEvent(
           velocity: { x: 0.045, y: 0.025 },
           radius: 0.045,
           mass: 1.3,
+          dragged: false,
           playing: true,
         },
         {
@@ -92,6 +99,7 @@ function worldEvent(
           velocity: { x: 0.035, y: -0.04 },
           radius: 0.045,
           mass: 1.5,
+          dragged: false,
           playing: true,
         },
         {
@@ -104,6 +112,7 @@ function worldEvent(
           velocity: { x: -0.04, y: 0.05 },
           radius: 0.045,
           mass: 0.8,
+          dragged: false,
           playing: true,
         },
       ],
@@ -182,6 +191,11 @@ describe('Drift bridge interface', () => {
             physicsStepCount: 1200,
             physicsCatchUpStepCount: 8,
             physicsCatchUpLimitHitCount: 1,
+            commandQueueDepth: 2,
+            maximumCommandQueueDepth: 7,
+            coalescedMoveCount: 12,
+            rejectedCommandCount: 1,
+            commandPressureEventCount: 0,
           },
         }),
       )
@@ -266,6 +280,56 @@ describe('Drift bridge interface', () => {
       bridge.publish(worldEvent(3, { phrases: [] }))
     })
     expect(container.querySelectorAll('[data-phrase-id]')).toHaveLength(4)
+  })
+
+  it('captures pointer drag intent in normalized native commands', () => {
+    const bridge = new FakeTransportBridge()
+    render(<App bridge={bridge} />)
+    act(() => bridge.publish(worldEvent(4)))
+
+    const pointerLayer = screen.getByLabelText('Drag phrase field') as HTMLDivElement
+    vi.spyOn(pointerLayer, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 1000,
+      bottom: 500,
+      width: 1000,
+      height: 500,
+      toJSON: () => ({}),
+    })
+    pointerLayer.setPointerCapture = vi.fn()
+    pointerLayer.hasPointerCapture = vi.fn(() => true)
+    pointerLayer.releasePointerCapture = vi.fn()
+
+    fireEvent.pointerDown(pointerLayer, { pointerId: 7, clientX: 200, clientY: 140 })
+    expect(bridge.commands.slice(-2)).toMatchObject([
+      { type: 'phrase.dragStart', payload: { phraseId: 'bass' } },
+      {
+        type: 'phrase.move',
+        payload: { phraseId: 'bass', position: { x: 0.2, y: 0.28 } },
+      },
+    ])
+    expect(pointerLayer.setPointerCapture).toHaveBeenCalledWith(7)
+
+    fireEvent.pointerMove(pointerLayer, { pointerId: 7, clientX: 500, clientY: 250 })
+    expect(bridge.commands.at(-1)).toMatchObject({
+      type: 'phrase.move',
+      payload: { phraseId: 'bass', position: { x: 0.5, y: 0.5 } },
+    })
+
+    fireEvent.pointerUp(pointerLayer, { pointerId: 7, clientX: 500, clientY: 250 })
+    expect(bridge.commands.at(-1)).toMatchObject({
+      type: 'phrase.dragEnd',
+      payload: { phraseId: 'bass' },
+    })
+    expect(pointerLayer.releasePointerCapture).toHaveBeenCalledWith(7)
+
+    const selectedWorld = worldEvent(5)
+    selectedWorld.payload.phrases[1].dragged = true
+    act(() => bridge.publish(selectedWorld))
+    expect(screen.getByText(/BASS · A · playing · selected/)).toBeTruthy()
   })
 
   it('selects opaque MIDI IDs and displays structured command rejections', () => {
