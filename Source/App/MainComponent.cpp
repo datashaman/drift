@@ -135,6 +135,15 @@ void MainComponent::publishState()
     diagnostics->setProperty (
         "bridgeReconnectCount",
         static_cast<juce::int64> (state.transport.diagnostics.bridgeReconnectCount));
+    diagnostics->setProperty (
+        "physicsStepCount",
+        static_cast<juce::int64> (state.transport.diagnostics.physicsStepCount));
+    diagnostics->setProperty (
+        "physicsCatchUpStepCount",
+        static_cast<juce::int64> (state.transport.diagnostics.physicsCatchUpStepCount));
+    diagnostics->setProperty (
+        "physicsCatchUpLimitHitCount",
+        static_cast<juce::int64> (state.transport.diagnostics.physicsCatchUpLimitHitCount));
     payload->setProperty ("diagnostics", juce::var { diagnostics });
 
     publishEvent ("transport.state", juce::var { payload });
@@ -143,6 +152,24 @@ void MainComponent::publishState()
 
 void MainComponent::publishWorldSnapshot (const drift::engine::ControllerSnapshot& state)
 {
+    if (lastPublishedWorldRevision > 0
+        && state.transport.worldRevision > lastPublishedWorldRevision + 1)
+    {
+        droppedWorldSnapshotCount += state.transport.worldRevision
+                                     - lastPublishedWorldRevision - 1;
+    }
+
+    lastPublishedWorldRevision = state.transport.worldRevision;
+
+    if (lastWorldPublicationSeconds > 0.0)
+    {
+        maximumWorldPublicationIntervalSeconds = std::max (
+            maximumWorldPublicationIntervalSeconds,
+            state.transport.engineTimeSeconds - lastWorldPublicationSeconds);
+    }
+
+    lastWorldPublicationSeconds = state.transport.engineTimeSeconds;
+
     auto* payload = new juce::DynamicObject();
     payload->setProperty ("sequence", static_cast<juce::int64> (++worldSnapshotSequence));
     payload->setProperty ("engineTimeMs", state.transport.engineTimeSeconds * 1000.0);
@@ -171,10 +198,33 @@ void MainComponent::publishWorldSnapshot (const drift::engine::ControllerSnapsho
         position->setProperty ("x", phrase.position.x);
         position->setProperty ("y", phrase.position.y);
         phraseObject->setProperty ("position", juce::var { position });
+
+        auto* velocity = new juce::DynamicObject();
+        velocity->setProperty ("x", phrase.velocity.x);
+        velocity->setProperty ("y", phrase.velocity.y);
+        phraseObject->setProperty ("velocity", juce::var { velocity });
+        phraseObject->setProperty ("radius", phrase.radius);
+        phraseObject->setProperty ("mass", phrase.mass);
         phrases.add (juce::var { phraseObject });
     }
 
     payload->setProperty ("phrases", juce::var { phrases });
+
+    auto* diagnostics = new juce::DynamicObject();
+    diagnostics->setProperty (
+        "physicsStepCount",
+        static_cast<juce::int64> (state.transport.diagnostics.physicsStepCount));
+    diagnostics->setProperty (
+        "physicsCatchUpStepCount",
+        static_cast<juce::int64> (state.transport.diagnostics.physicsCatchUpStepCount));
+    diagnostics->setProperty (
+        "physicsCatchUpLimitHitCount",
+        static_cast<juce::int64> (state.transport.diagnostics.physicsCatchUpLimitHitCount));
+    diagnostics->setProperty (
+        "droppedSnapshotCount", static_cast<juce::int64> (droppedWorldSnapshotCount));
+    diagnostics->setProperty (
+        "maximumSnapshotIntervalMs", maximumWorldPublicationIntervalSeconds * 1000.0);
+    payload->setProperty ("diagnostics", juce::var { diagnostics });
     publishEvent ("world.snapshot", juce::var { payload });
 }
 

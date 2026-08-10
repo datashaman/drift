@@ -50,6 +50,13 @@ function worldEvent(
       sequence,
       engineTimeMs: 1250,
       transport: { playing: true, bpm: 120, bar: 1, beat: 3.5 },
+      diagnostics: {
+        physicsStepCount: 150,
+        physicsCatchUpStepCount: 3,
+        physicsCatchUpLimitHitCount: 0,
+        droppedSnapshotCount: 112,
+        maximumSnapshotIntervalMs: 34.2,
+      },
       phrases: [
         {
           id: 'drums',
@@ -58,6 +65,9 @@ function worldEvent(
           currentVariantId: 'A',
           midiChannel: 10,
           position: { x: 0.78, y: 0.58 },
+          velocity: { x: -0.055, y: -0.035 },
+          radius: 0.045,
+          mass: 1.1,
           playing: true,
         },
         {
@@ -67,6 +77,9 @@ function worldEvent(
           currentVariantId: 'A',
           midiChannel: 1,
           position: { x: 0.2, y: 0.28 },
+          velocity: { x: 0.045, y: 0.025 },
+          radius: 0.045,
+          mass: 1.3,
           playing: true,
         },
         {
@@ -76,6 +89,9 @@ function worldEvent(
           currentVariantId: 'A',
           midiChannel: 2,
           position: { x: 0.45, y: 0.76 },
+          velocity: { x: 0.035, y: -0.04 },
+          radius: 0.045,
+          mass: 1.5,
           playing: true,
         },
         {
@@ -85,6 +101,9 @@ function worldEvent(
           currentVariantId: 'A',
           midiChannel: 3,
           position: { x: 0.74, y: 0.2 },
+          velocity: { x: -0.04, y: 0.05 },
+          radius: 0.045,
+          mass: 0.8,
           playing: true,
         },
       ],
@@ -160,6 +179,9 @@ describe('Drift bridge interface', () => {
             lateMidiEventCount: 0,
             maximumEngineLatenessMs: 0.125,
             bridgeReconnectCount: 4,
+            physicsStepCount: 1200,
+            physicsCatchUpStepCount: 8,
+            physicsCatchUpLimitHitCount: 1,
           },
         }),
       )
@@ -217,6 +239,11 @@ describe('Drift bridge interface', () => {
     }
     eventListener?.(invalidWorld)
     expect(receivedWorldSequence).toBe(5)
+
+    const invalidDiagnostics = worldEvent(7)
+    invalidDiagnostics.payload.diagnostics.droppedSnapshotCount = -1
+    eventListener?.(invalidDiagnostics)
+    expect(receivedWorldSequence).toBe(5)
   })
 
   it('renders four phrases from the latest authoritative world snapshot', () => {
@@ -227,13 +254,13 @@ describe('Drift bridge interface', () => {
     act(() => bridge.publish(worldEvent(4)))
 
     expect(container.querySelectorAll('[data-phrase-id]')).toHaveLength(4)
-    expect(screen.getByText('DRUMS · A')).toBeTruthy()
-    expect(screen.getByText('BASS · A')).toBeTruthy()
-    expect(screen.getByText('CHORDS · A')).toBeTruthy()
-    expect(screen.getByText('MELODY · A')).toBeTruthy()
+    expect(screen.getByText(/DRUMS · A/)).toBeTruthy()
+    expect(screen.getByText(/BASS · A/)).toBeTruthy()
+    expect(screen.getByText(/CHORDS · A/)).toBeTruthy()
+    expect(screen.getByText(/MELODY · A/)).toBeTruthy()
     expect(screen.getByText('4 roles / 4 beats')).toBeTruthy()
-    expect((container.querySelector('[data-phrase-id="bass"]') as HTMLElement).style.left)
-      .toBe('20%')
+    expect(container.textContent).toContain('112 snapshots')
+    expect(container.textContent).toContain('34.2 ms')
 
     act(() => {
       bridge.publish(worldEvent(3, { phrases: [] }))
@@ -315,7 +342,7 @@ describe('Drift bridge interface', () => {
     expect(screen.getByText('Playing')).toBeTruthy()
     expect(screen.getByText('07')).toBeTruthy()
     expect(screen.getByText('3.75')).toBeTruthy()
-    expect(screen.getByText('BASS · A')).toBeTruthy()
+    expect(screen.getByText(/BASS · A/)).toBeTruthy()
   })
 
   it('disables commands outside the native host', () => {

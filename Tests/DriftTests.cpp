@@ -1,4 +1,5 @@
 #include "Engine/Clock.h"
+#include "Engine/SpatialWorld.h"
 #include "Engine/TransportEngine.h"
 #include "Music/MidiSink.h"
 #include "Music/MidiOutput.h"
@@ -268,6 +269,9 @@ void testPhraseSchedulingAcrossLoopAndBar()
         drift::music::PhraseRole::bass,
         "A",
         { 0.5, 0.5 },
+        { 0.0, 0.0 },
+        0.045,
+        1.0,
     };
     drift::music::RecordingMidiSink sink;
     drift::music::PhraseScheduler scheduler;
@@ -316,10 +320,83 @@ void testInitialCompositionIsAuthoritative()
         expect (phrase.position.x >= 0.0 && phrase.position.x <= 1.0
                     && phrase.position.y >= 0.0 && phrase.position.y <= 1.0,
                 "Every phrase begins at a normalized world position");
+        expect (std::isfinite (phrase.velocity.x) && std::isfinite (phrase.velocity.y),
+                "Every phrase begins with a finite native-world velocity");
+        expect (phrase.radius > 0.0 && phrase.radius <= 0.5,
+                "Every phrase has a usable normalized collision radius");
+        expect (phrase.mass > 0.0, "Every phrase has positive mass");
         uniqueIds.insert (phrase.id);
     }
 
     expect (uniqueIds.size() == phrases.size(), "Phrase IDs are unique");
+}
+
+void testSpatialWorldFixedStepAndBoundaries()
+{
+    using drift::engine::PhraseBody;
+    using drift::engine::SpatialWorld;
+
+    SpatialWorld integrationWorld {
+        { PhraseBody { "moving", { 0.5, 0.5 }, { 0.12, -0.24 }, 0.05, 1.0 } },
+        0.0,
+    };
+    integrationWorld.advanceTo (SpatialWorld::fixedStepSeconds);
+    const auto& moving = integrationWorld.bodies().front();
+    expectNear (moving.position.x, 0.501,
+                "A fixed 120 Hz step integrates horizontal velocity");
+    expectNear (moving.position.y, 0.498,
+                "A fixed 120 Hz step integrates vertical velocity");
+    expect (integrationWorld.revision() == 1,
+            "Every integrated fixed step advances the world revision");
+
+    SpatialWorld boundaryWorld {
+        {
+            PhraseBody { "left", { 0.0501, 0.5 }, { -0.12, 0.0 }, 0.05, 1.0 },
+            PhraseBody { "right", { 0.9499, 0.5 }, { 0.12, 0.0 }, 0.05, 1.0 },
+            PhraseBody { "top", { 0.5, 0.0501 }, { 0.0, -0.12 }, 0.05, 1.0 },
+            PhraseBody { "bottom", { 0.5, 0.9499 }, { 0.0, 0.12 }, 0.05, 1.0 },
+            PhraseBody { "corner", { 0.0501, 0.0501 }, { -0.12, -0.12 }, 0.05, 1.0 },
+        },
+        0.0,
+    };
+    boundaryWorld.advanceTo (SpatialWorld::fixedStepSeconds);
+    const auto& bodies = boundaryWorld.bodies();
+    expect (bodies[0].velocity.x > 0.0, "The left edge reflects horizontal velocity");
+    expect (bodies[1].velocity.x < 0.0, "The right edge reflects horizontal velocity");
+    expect (bodies[2].velocity.y > 0.0, "The top edge reflects vertical velocity");
+    expect (bodies[3].velocity.y < 0.0, "The bottom edge reflects vertical velocity");
+    expect (bodies[4].velocity.x > 0.0 && bodies[4].velocity.y > 0.0,
+            "A corner collision reflects both velocity axes");
+    expect (std::all_of (bodies.begin(), bodies.end(), [] (const auto& body) {
+                return body.position.x >= body.radius && body.position.x <= 1.0 - body.radius
+                       && body.position.y >= body.radius
+                       && body.position.y <= 1.0 - body.radius;
+            }),
+            "No edge or corner collision lets a phrase escape normalized bounds");
+}
+
+void testSpatialWorldBoundsCatchUpWork()
+{
+    drift::engine::SpatialWorld world {
+        { drift::engine::PhraseBody { "delayed", { 0.94, 0.94 }, { 2.0, 2.0 }, 0.05, 1.0 } },
+        0.0,
+    };
+
+    world.advanceTo (1.0);
+    const auto& diagnostics = world.diagnostics();
+    const auto& body = world.bodies().front();
+    expect (diagnostics.physicsStepCount
+                == static_cast<std::size_t> (drift::engine::SpatialWorld::maximumCatchUpSteps),
+            "A delayed observer performs only the bounded number of physics steps");
+    expect (diagnostics.physicsCatchUpStepCount
+                == static_cast<std::size_t> (
+                    drift::engine::SpatialWorld::maximumCatchUpSteps - 1),
+            "Catch-up diagnostics count extra work beyond the ordinary step");
+    expect (diagnostics.physicsCatchUpLimitHitCount == 1,
+            "A capped physics backlog is visible in diagnostics");
+    expect (body.position.x >= body.radius && body.position.x <= 1.0 - body.radius
+                && body.position.y >= body.radius && body.position.y <= 1.0 - body.radius,
+            "Bounded catch-up cannot eject a fast phrase from the world");
 }
 
 void testFourPhrasesShareOneTransport()
@@ -414,6 +491,11 @@ void testEngineIsIndependentOfUiUpdateTiming()
     expect (delayedState.diagnostics.schedulingWatermarkBeat
                 >= 4.2 - drift::engine::TransportEngine::timingToleranceSeconds,
             "The scheduling watermark advances monotonically through catch-up");
+    expect (delayedState.diagnostics.physicsCatchUpLimitHitCount > 0,
+            "A delayed engine tick caps physics catch-up independently of musical time");
+    expect (delayedState.worldRevision
+                == static_cast<std::size_t> (drift::engine::SpatialWorld::maximumCatchUpSteps + 1),
+            "The capped native world does not alter the monotonic transport result");
 
     const auto hasSecondLoopStart = std::any_of (
         sink.messages().begin(), sink.messages().end(), [] (const auto& message) {
@@ -689,6 +771,8 @@ int main()
     testQuantizationBoundaries();
     testPhraseSchedulingAcrossLoopAndBar();
     testInitialCompositionIsAuthoritative();
+    testSpatialWorldFixedStepAndBoundaries();
+    testSpatialWorldBoundsCatchUpWork();
     testFourPhrasesShareOneTransport();
     testEngineIsIndependentOfUiUpdateTiming();
     testMidiOutputSelectionAndReplacement();

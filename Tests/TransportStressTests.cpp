@@ -234,6 +234,20 @@ int main()
              "engine lateness exceeded tolerance");
     require (stressed.snapshot.diagnostics.bridgeReconnectCount == 20,
              "not all simulated bridge reconnects were recorded");
+    require (stressed.snapshot.diagnostics.physicsStepCount == 72000,
+             "the native world did not integrate at exactly 120 Hz");
+    require (stressed.snapshot.diagnostics.physicsCatchUpLimitHitCount == 0,
+             "regular engine ticks unexpectedly capped physics catch-up");
+    require (std::all_of (
+                 stressed.snapshot.phrases.begin(),
+                 stressed.snapshot.phrases.end(),
+                 [] (const auto& phrase) {
+                     return phrase.position.x >= phrase.radius
+                            && phrase.position.x <= 1.0 - phrase.radius
+                            && phrase.position.y >= phrase.radius
+                            && phrase.position.y <= 1.0 - phrase.radius;
+                 }),
+             "a phrase escaped normalized world bounds during the stress run");
     require (stressed.uiStallCount >= 10, "the harness did not introduce enough UI stalls");
 
     std::cout << std::fixed << std::setprecision (9)
@@ -245,6 +259,11 @@ int main()
               << "UI observations: " << stressed.uiObservationCount << '\n'
               << "Bridge reconnects: "
               << stressed.snapshot.diagnostics.bridgeReconnectCount << '\n'
+              << "Physics steps: " << stressed.snapshot.diagnostics.physicsStepCount << '\n'
+              << "Physics catch-up steps: "
+              << stressed.snapshot.diagnostics.physicsCatchUpStepCount << '\n'
+              << "Physics catch-up caps: "
+              << stressed.snapshot.diagnostics.physicsCatchUpLimitHitCount << '\n'
               << "Recorded MIDI messages: " << stressed.messages.size() << '\n'
               << "Scheduling watermark: "
               << stressed.snapshot.diagnostics.schedulingWatermarkBeat << " beats\n"
