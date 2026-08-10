@@ -140,7 +140,27 @@ export function App({ bridge }: AppProps) {
         <div className="relationship relationship--one" aria-hidden="true" />
         <div className="relationship relationship--two" aria-hidden="true" />
 
-        <PhraseWorld snapshot={worldSnapshot} />
+        <PhraseWorld
+          onDragEnd={(phraseId) =>
+            transportBridge.send(createCommand({
+              type: 'phrase.dragEnd',
+              payload: { phraseId },
+            }))
+          }
+          onDragMove={(phraseId, position) =>
+            transportBridge.send(createCommand({
+              type: 'phrase.move',
+              payload: { phraseId, position },
+            }))
+          }
+          onDragStart={(phraseId) =>
+            transportBridge.send(createCommand({
+              type: 'phrase.dragStart',
+              payload: { phraseId },
+            }))
+          }
+          snapshot={worldSnapshot}
+        />
 
         <p className="field-note">
           {worldSnapshot.phrases.length === 0
@@ -220,6 +240,22 @@ export function App({ bridge }: AppProps) {
           <div>
             <dt>Snapshot max</dt>
             <dd>{worldSnapshot.diagnostics.maximumSnapshotIntervalMs.toFixed(1)} ms</dd>
+          </div>
+          <div>
+            <dt>Command queue</dt>
+            <dd>
+              {worldSnapshot.diagnostics.commandQueueDepth} / {worldSnapshot.diagnostics.maximumCommandQueueDepth} max
+            </dd>
+          </div>
+          <div>
+            <dt>Coalesced</dt>
+            <dd>{worldSnapshot.diagnostics.coalescedMoveCount} moves</dd>
+          </div>
+          <div>
+            <dt>Rejected</dt>
+            <dd>
+              {worldSnapshot.diagnostics.rejectedCommandCount} / {worldSnapshot.diagnostics.commandPressureEventCount} pressure
+            </dd>
           </div>
         </dl>
 

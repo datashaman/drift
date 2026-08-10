@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import type { PointerEvent as ReactPointerEvent } from 'react'
 
 import type {
   Application,
@@ -8,10 +9,20 @@ import type {
 } from 'pixi.js'
 
 import type { PhraseSnapshot, WorldSnapshot } from './bridge/transportBridge'
+import {
+  clampPositionForPhrase,
+  findPhraseAtPosition,
+  normalisePointerPosition,
+  shouldClearOptimisticDrag,
+  type NormalizedPoint,
+} from './dragInteraction'
 import { interpolatePhrases } from './worldInterpolation'
 
 interface PhraseWorldProps {
   snapshot: WorldSnapshot
+  onDragStart(phraseId: string): void
+  onDragMove(phraseId: string, position: NormalizedPoint): void
+  onDragEnd(phraseId: string): void
 }
 
 interface SceneNode {
@@ -19,6 +30,15 @@ interface SceneNode {
   core: Graphics
   direction: Graphics
   label: PixiText
+  selection: Graphics
+}
+
+interface OptimisticDrag {
+  phraseId: string
+  pointerId: number
+  position: NormalizedPoint
+  startedSequence: number
+  releasedSequence?: number
 }
 
 const phraseColours: Record<string, number> = {
@@ -32,8 +52,14 @@ function colourForPhrase(phrase: PhraseSnapshot) {
   return phraseColours[phrase.id] ?? 0xeef1e8
 }
 
-export function PhraseWorld({ snapshot }: PhraseWorldProps) {
+export function PhraseWorld({
+  snapshot,
+  onDragStart,
+  onDragMove,
+  onDragEnd,
+}: PhraseWorldProps) {
   const hostRef = useRef<HTMLDivElement>(null)
+  const optimisticDragRef = useRef<OptimisticDrag | undefined>(undefined)
   const transitionRef = useRef({
     previous: snapshot,
     current: snapshot,
@@ -43,14 +69,34 @@ export function PhraseWorld({ snapshot }: PhraseWorldProps) {
 
   useEffect(() => {
     const transition = transitionRef.current
+    const optimistic = optimisticDragRef.current
+    const reconcileOptimistic = optimistic
+      ? shouldClearOptimisticDrag(optimistic, snapshot)
+      : false
+    const previous = reconcileOptimistic && optimistic
+      ? {
+          ...snapshot,
+          phrases: snapshot.phrases.map((phrase) =>
+            phrase.id === optimistic.phraseId
+              ? { ...phrase, position: optimistic.position }
+              : phrase,
+          ),
+        }
+      : transition.current.sequence > 0
+        ? transition.current
+        : snapshot
+
     transitionRef.current = {
-      previous: transition.current.sequence > 0 ? transition.current : snapshot,
+      previous,
       current: snapshot,
       startedAtMs: performance.now(),
       durationMs: Math.min(
         100,
         Math.max(16, snapshot.engineTimeMs - transition.current.engineTimeMs),
       ),
+    }
+    if (reconcileOptimistic) {
+      optimisticDragRef.current = undefined
     }
   }, [snapshot])
 
@@ -99,6 +145,9 @@ export function PhraseWorld({ snapshot }: PhraseWorldProps) {
           .moveTo(1, 0)
           .lineTo(0.76, 0.16)
           .stroke({ color: colour, width: 0.08, alpha: 0.62 })
+        const selection = new Graphics()
+          .circle(0, 0, 1)
+          .stroke({ color: 0xeef1e8, width: 0.1, alpha: 0.82 })
         const label = new Text({
           text: `${phrase.name} · ${phrase.currentVariantId}`,
           style: {
@@ -109,9 +158,9 @@ export function PhraseWorld({ snapshot }: PhraseWorldProps) {
           },
         })
 
-        container.addChild(direction, core, label)
+        container.addChild(selection, direction, core, label)
         app.stage.addChild(container)
-        const node = { container, core, direction, label }
+        const node = { container, core, direction, label, selection }
         nodes.set(phrase.id, node)
         return node
       }
@@ -134,14 +183,19 @@ export function PhraseWorld({ snapshot }: PhraseWorldProps) {
         for (const phrase of phrases) {
           const node = nodes.get(phrase.id) ?? makeNode(phrase)
           const radiusPixels = phrase.radius * minimumDimension
+          const optimistic = optimisticDragRef.current
+          const isOptimisticallyDragged = optimistic?.phraseId === phrase.id
+          const position = isOptimisticallyDragged ? optimistic.position : phrase.position
           node.container.position.set(
-            phrase.position.x * app.screen.width,
-            phrase.position.y * app.screen.height,
+            position.x * app.screen.width,
+            position.y * app.screen.height,
           )
           node.container.alpha = phrase.playing ? 1 : 0.62
           node.core.scale.set(radiusPixels)
           node.direction.rotation = phrase.directionRadians
           node.direction.scale.set(radiusPixels * 2.1)
+          node.selection.visible = phrase.dragged || isOptimisticallyDragged
+          node.selection.scale.set(radiusPixels * 1.28)
           node.label.position.set(radiusPixels + 10, -7)
           node.label.text = `${phrase.name} · ${phrase.currentVariantId}`
         }
@@ -158,12 +212,91 @@ export function PhraseWorld({ snapshot }: PhraseWorldProps) {
     }
   }, [])
 
+  const pointerPosition = (event: ReactPointerEvent<HTMLDivElement>) =>
+    normalisePointerPosition(
+      event.clientX,
+      event.clientY,
+      event.currentTarget.getBoundingClientRect(),
+    )
+
+  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (optimisticDragRef.current) return
+
+    const position = pointerPosition(event)
+    const phrase = findPhraseAtPosition(snapshot.phrases, position)
+    if (!phrase) return
+
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    const clamped = clampPositionForPhrase(position, phrase.radius)
+    optimisticDragRef.current = {
+      phraseId: phrase.id,
+      pointerId: event.pointerId,
+      position: clamped,
+      startedSequence: snapshot.sequence,
+    }
+    onDragStart(phrase.id)
+    onDragMove(phrase.id, clamped)
+  }
+
+  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const optimistic = optimisticDragRef.current
+    if (!optimistic || optimistic.pointerId !== event.pointerId
+        || optimistic.releasedSequence !== undefined) return
+
+    const phrase = snapshot.phrases.find((candidate) => candidate.id === optimistic.phraseId)
+    if (!phrase) return
+
+    event.preventDefault()
+    const clamped = clampPositionForPhrase(pointerPosition(event), phrase.radius)
+    optimistic.position = clamped
+    onDragMove(phrase.id, clamped)
+  }
+
+  const endPointerDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const optimistic = optimisticDragRef.current
+    if (!optimistic || optimistic.pointerId !== event.pointerId
+        || optimistic.releasedSequence !== undefined) return
+
+    const phrase = snapshot.phrases.find((candidate) => candidate.id === optimistic.phraseId)
+    if (phrase) {
+      const clamped = clampPositionForPhrase(pointerPosition(event), phrase.radius)
+      optimistic.position = clamped
+      onDragMove(phrase.id, clamped)
+      onDragEnd(phrase.id)
+    }
+    optimistic.releasedSequence = snapshot.sequence
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }
+
+  const cancelPointerDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const optimistic = optimisticDragRef.current
+    if (!optimistic || optimistic.pointerId !== event.pointerId
+        || optimistic.releasedSequence !== undefined) return
+
+    onDragEnd(optimistic.phraseId)
+    optimistic.releasedSequence = snapshot.sequence
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }
+
   return (
     <div className="phrase-world" ref={hostRef}>
+      <div
+        aria-label="Drag phrase field"
+        className="phrase-world-pointer-layer"
+        onPointerCancel={cancelPointerDrag}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={endPointerDrag}
+      />
       <ul className="phrase-world-accessibility" aria-label="Phrase world">
         {snapshot.phrases.map((phrase) => (
           <li data-phrase-id={phrase.id} key={phrase.id}>
-            {phrase.name} · {phrase.currentVariantId} · {phrase.playing ? 'playing' : 'stopped'}
+            {phrase.name} · {phrase.currentVariantId} · {phrase.playing ? 'playing' : 'stopped'} · {phrase.dragged ? 'selected' : 'free'}
           </li>
         ))}
       </ul>

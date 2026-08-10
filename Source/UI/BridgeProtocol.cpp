@@ -41,6 +41,9 @@ std::optional<BridgeCommandType> commandTypeForName (const juce::String& type)
     if (type == "transport.stop") return BridgeCommandType::transportStop;
     if (type == "transport.setTempo") return BridgeCommandType::transportSetTempo;
     if (type == "midi.selectOutput") return BridgeCommandType::midiSelectOutput;
+    if (type == "phrase.dragStart") return BridgeCommandType::phraseDragStart;
+    if (type == "phrase.move") return BridgeCommandType::phraseMove;
+    if (type == "phrase.dragEnd") return BridgeCommandType::phraseDragEnd;
     return std::nullopt;
 }
 } // namespace
@@ -88,7 +91,9 @@ CommandDispatchResult validateCommandEnvelope (const juce::var& envelope)
         return reject (messageId.toStdString(), CommandRejectionCode::invalidPayload,
                        "The command payload must be an object");
 
-    ValidatedBridgeCommand command { *commandType, messageId.toStdString(), 120.0, {} };
+    ValidatedBridgeCommand command;
+    command.type = *commandType;
+    command.messageId = messageId.toStdString();
 
     if (*commandType == BridgeCommandType::transportSetTempo)
     {
@@ -118,6 +123,43 @@ CommandDispatchResult validateCommandEnvelope (const juce::var& envelope)
 
         command.outputId = outputId.toString().toStdString();
     }
+    else if (*commandType == BridgeCommandType::phraseDragStart
+             || *commandType == BridgeCommandType::phraseMove
+             || *commandType == BridgeCommandType::phraseDragEnd)
+    {
+        const auto phraseId = payloadObject->getProperty ("phraseId");
+        if (! phraseId.isString() || ! isValidMessageId (phraseId.toString()))
+            return reject (command.messageId, CommandRejectionCode::invalidPayload,
+                           "The phrase payload requires a stable phraseId");
+
+        command.phraseId = phraseId.toString().toStdString();
+
+        if (*commandType == BridgeCommandType::phraseMove)
+        {
+            const auto* position = payloadObject->getProperty ("position").getDynamicObject();
+            if (position == nullptr)
+                return reject (command.messageId, CommandRejectionCode::invalidPayload,
+                               "The move payload requires a position object");
+
+            const auto x = position->getProperty ("x");
+            const auto y = position->getProperty ("y");
+            const auto xIsNumeric = x.isInt() || x.isInt64() || x.isDouble();
+            const auto yIsNumeric = y.isInt() || y.isInt64() || y.isDouble();
+            if (! xIsNumeric || ! yIsNumeric)
+                return reject (command.messageId, CommandRejectionCode::invalidPayload,
+                               "The move position requires numeric x and y coordinates");
+
+            command.positionX = static_cast<double> (x);
+            command.positionY = static_cast<double> (y);
+            if (! std::isfinite (command.positionX) || ! std::isfinite (command.positionY)
+                || command.positionX < 0.0 || command.positionX > 1.0
+                || command.positionY < 0.0 || command.positionY > 1.0)
+            {
+                return reject (command.messageId, CommandRejectionCode::outOfRange,
+                               "Phrase coordinates must be normalized between 0 and 1");
+            }
+        }
+    }
 
     return { command, std::nullopt };
 }
@@ -141,6 +183,16 @@ CommandDispatchResult dispatchCommandEnvelope (const juce::var& envelope,
                        "The MIDI outputId is not currently available");
     }
 
+    const auto isPhraseCommand = command.type == BridgeCommandType::phraseDragStart
+                                 || command.type == BridgeCommandType::phraseMove
+                                 || command.type == BridgeCommandType::phraseDragEnd;
+    if (isPhraseCommand && handlers.phraseIdExists
+        && ! handlers.phraseIdExists (command.phraseId))
+    {
+        return reject (command.messageId, CommandRejectionCode::unknownId,
+                       "The phraseId is not part of the authoritative world");
+    }
+
     switch (command.type)
     {
         case BridgeCommandType::appConnect:
@@ -157,6 +209,16 @@ CommandDispatchResult dispatchCommandEnvelope (const juce::var& envelope,
             break;
         case BridgeCommandType::midiSelectOutput:
             if (handlers.onMidiSelectOutput) handlers.onMidiSelectOutput (command.outputId);
+            break;
+        case BridgeCommandType::phraseDragStart:
+            if (handlers.onPhraseDragStart) handlers.onPhraseDragStart (command.phraseId);
+            break;
+        case BridgeCommandType::phraseMove:
+            if (handlers.onPhraseMove)
+                handlers.onPhraseMove (command.phraseId, command.positionX, command.positionY);
+            break;
+        case BridgeCommandType::phraseDragEnd:
+            if (handlers.onPhraseDragEnd) handlers.onPhraseDragEnd (command.phraseId);
             break;
     }
 
@@ -196,6 +258,9 @@ const char* commandRejectionCodeName (CommandRejectionCode code) noexcept
         case CommandRejectionCode::invalidPayload: return "invalid_payload";
         case CommandRejectionCode::outOfRange: return "out_of_range";
         case CommandRejectionCode::unknownId: return "unknown_id";
+        case CommandRejectionCode::staleCommand: return "stale_command";
+        case CommandRejectionCode::queueBusy: return "queue_busy";
+        case CommandRejectionCode::queueFull: return "queue_full";
     }
 
     return "malformed_envelope";

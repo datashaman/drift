@@ -1,4 +1,5 @@
 #include "Engine/Clock.h"
+#include "Engine/EngineCommandQueue.h"
 #include "Engine/SpatialWorld.h"
 #include "Engine/TransportEngine.h"
 #include "Music/MidiSink.h"
@@ -188,6 +189,24 @@ juce::var makeOutputPayload (const juce::String& outputId)
 {
     auto* object = new juce::DynamicObject();
     object->setProperty ("outputId", outputId);
+    return juce::var { object };
+}
+
+juce::var makePhrasePayload (const juce::String& phraseId)
+{
+    auto* object = new juce::DynamicObject();
+    object->setProperty ("phraseId", phraseId);
+    return juce::var { object };
+}
+
+juce::var makeMovePayload (const juce::String& phraseId, double x, double y)
+{
+    auto* position = new juce::DynamicObject();
+    position->setProperty ("x", x);
+    position->setProperty ("y", y);
+    auto* object = new juce::DynamicObject();
+    object->setProperty ("phraseId", phraseId);
+    object->setProperty ("position", juce::var { position });
     return juce::var { object };
 }
 
@@ -397,6 +416,168 @@ void testSpatialWorldBoundsCatchUpWork()
     expect (body.position.x >= body.radius && body.position.x <= 1.0 - body.radius
                 && body.position.y >= body.radius && body.position.y <= 1.0 - body.radius,
             "Bounded catch-up cannot eject a fast phrase from the world");
+}
+
+void testSpatialWorldDragLifecycle()
+{
+    drift::engine::SpatialWorld world {
+        { drift::engine::PhraseBody { "dragged", { 0.5, 0.5 }, { 0.12, -0.24 }, 0.05, 1.0 } },
+        0.0,
+    };
+
+    expect (! world.moveDraggedPhrase ("dragged", { 0.2, 0.2 }),
+            "A move without a drag lifecycle is stale");
+    expect (world.beginDrag ("dragged"), "A known free phrase can begin a drag");
+    expect (! world.beginDrag ("dragged"), "A duplicate drag start is stale");
+    world.advanceTo (10.0 * drift::engine::SpatialWorld::fixedStepSeconds);
+    expectNear (world.bodies().front().position.x, 0.5,
+                "Autonomous integration cannot fight direct manipulation on x");
+    expectNear (world.bodies().front().position.y, 0.5,
+                "Autonomous integration cannot fight direct manipulation on y");
+
+    expect (world.moveDraggedPhrase ("dragged", { 0.0, 1.0 }),
+            "An active drag accepts normalized pointer position");
+    expectNear (world.bodies().front().position.x, 0.05,
+                "Native authority clamps a dragged phrase to its left radius");
+    expectNear (world.bodies().front().position.y, 0.95,
+                "Native authority clamps a dragged phrase to its bottom radius");
+    expect (world.endDrag ("dragged"), "An active drag can end");
+    expect (! world.endDrag ("dragged"), "A duplicate drag end is stale");
+
+    world.advanceTo (11.0 * drift::engine::SpatialWorld::fixedStepSeconds);
+    expect (world.bodies().front().position.x > 0.05,
+            "Autonomous velocity resumes after direct manipulation ends");
+
+    expect (world.beginDrag ("dragged"), "The phrase can begin another drag");
+    world.endAllDrags();
+    expect (! world.bodies().front().dragged,
+            "A reconnect can release every abandoned native drag");
+}
+
+void testEngineCommandQueueCoalescingAndPressure()
+{
+    using drift::engine::CommandEnqueueResult;
+    using drift::engine::EngineCommand;
+    using drift::engine::EngineCommandQueue;
+    using drift::engine::EngineCommandType;
+
+    const auto makeEngineCommand = [] (EngineCommandType type,
+                                       std::string messageId,
+                                       std::string phraseId = {}) {
+        EngineCommand command;
+        command.type = type;
+        command.messageId = std::move (messageId);
+        command.phraseId = std::move (phraseId);
+        return command;
+    };
+
+    EngineCommandQueue queue { 32 };
+    expect (queue.tryEnqueue (makeEngineCommand (
+                EngineCommandType::phraseMove, "stale", "bass"))
+                == CommandEnqueueResult::staleDrag,
+            "A move before drag start is rejected as stale");
+    expect (queue.tryEnqueue (makeEngineCommand (
+                EngineCommandType::phraseDragStart, "start-bass", "bass"))
+                == CommandEnqueueResult::accepted,
+            "A discrete drag start enters the command queue");
+    expect (queue.tryEnqueue (makeEngineCommand (
+                EngineCommandType::phraseDragStart, "start-drums", "drums"))
+                == CommandEnqueueResult::accepted,
+            "Independent phrase drags retain discrete ordering");
+
+    auto bassMove = makeEngineCommand (EngineCommandType::phraseMove, "move-bass-1", "bass");
+    bassMove.position = { 0.3, 0.4 };
+    auto drumsMove = makeEngineCommand (
+        EngineCommandType::phraseMove, "move-drums", "drums");
+    drumsMove.position = { 0.7, 0.6 };
+    auto latestBassMove = makeEngineCommand (
+        EngineCommandType::phraseMove, "move-bass-2", "bass");
+    latestBassMove.position = { 0.8, 0.2 };
+    expect (queue.tryEnqueue (bassMove) == CommandEnqueueResult::accepted,
+            "The first move enters the queue");
+    expect (queue.tryEnqueue (drumsMove) == CommandEnqueueResult::accepted,
+            "Moves for different phrases can coexist");
+    expect (queue.tryEnqueue (latestBassMove) == CommandEnqueueResult::coalesced,
+            "A stale move coalesces by phrase across other move commands");
+    expect (queue.tryEnqueue (makeEngineCommand (EngineCommandType::transportPlay, "play"))
+                == CommandEnqueueResult::accepted,
+            "A transport command remains an ordered discrete barrier");
+
+    auto postBarrierMove = makeEngineCommand (
+        EngineCommandType::phraseMove, "move-bass-3", "bass");
+    postBarrierMove.position = { 0.6, 0.6 };
+    expect (queue.tryEnqueue (postBarrierMove) == CommandEnqueueResult::accepted,
+            "A move cannot coalesce backward across a discrete command");
+
+    std::vector<EngineCommand> drained;
+    while (const auto command = queue.tryDequeue())
+        drained.push_back (*command);
+    expect (drained.size() == 6, "Coalescing removes only the stale move command");
+    expect (drained[2].messageId == "move-bass-2",
+            "The coalesced slot retains the newest bass position");
+    expect (drained[4].type == EngineCommandType::transportPlay
+                && drained[5].messageId == "move-bass-3",
+            "Discrete ordering is retained around later movement");
+    expect (queue.diagnostics().coalescedMoveCount == 1,
+            "Move coalescing is observable in queue diagnostics");
+
+    EngineCommandQueue pressureQueue { 2 };
+    expect (pressureQueue.tryEnqueue (
+                makeEngineCommand (EngineCommandType::transportPlay, "play"))
+                == CommandEnqueueResult::accepted,
+            "The bounded queue accepts its first discrete command");
+    expect (pressureQueue.tryEnqueue (
+                makeEngineCommand (EngineCommandType::transportStop, "stop"))
+                == CommandEnqueueResult::accepted,
+            "The bounded queue accepts discrete commands to capacity");
+    expect (pressureQueue.tryEnqueue (
+                makeEngineCommand (EngineCommandType::appConnect, "connect"))
+                == CommandEnqueueResult::queueFull,
+            "A saturated discrete queue rejects explicitly rather than dropping silently");
+    expect (pressureQueue.diagnostics().maximumQueueDepth == 2
+                && pressureQueue.diagnostics().pressureEventCount == 1,
+            "Queue depth and saturation pressure are observable");
+
+    EngineCommandQueue reservedQueue { 18 };
+    reservedQueue.tryEnqueue (makeEngineCommand (
+        EngineCommandType::phraseDragStart, "start-bass", "bass"));
+    auto reservedMove = makeEngineCommand (
+        EngineCommandType::phraseMove, "move-bass", "bass");
+    reservedQueue.tryEnqueue (reservedMove);
+    reservedQueue.tryEnqueue (makeEngineCommand (
+        EngineCommandType::phraseDragStart, "start-drums", "drums"));
+    auto overflowingMove = makeEngineCommand (
+        EngineCommandType::phraseMove, "move-drums", "drums");
+    expect (reservedQueue.tryEnqueue (overflowingMove) == CommandEnqueueResult::queueFull,
+            "Move pressure stops before consuming reserved discrete capacity");
+    expect (reservedQueue.tryEnqueue (
+                makeEngineCommand (EngineCommandType::transportStop, "stop"))
+                == CommandEnqueueResult::accepted,
+            "A transport command remains enqueueable under move pressure");
+
+    EngineCommandQueue evictionQueue { 18 };
+    evictionQueue.tryEnqueue (makeEngineCommand (
+        EngineCommandType::phraseDragStart, "start", "bass"));
+    evictionQueue.tryEnqueue (makeEngineCommand (
+        EngineCommandType::phraseMove, "move", "bass"));
+    for (auto index = 0; index < 16; ++index)
+    {
+        evictionQueue.tryEnqueue (makeEngineCommand (
+            EngineCommandType::transportPlay, "play-" + std::to_string (index)));
+    }
+    expect (evictionQueue.tryEnqueue (makeEngineCommand (
+                EngineCommandType::phraseDragEnd, "end", "bass"))
+                == CommandEnqueueResult::accepted,
+            "A full queue evicts stale movement rather than dropping drag end");
+
+    EngineCommandQueue reconnectQueue;
+    reconnectQueue.tryEnqueue (makeEngineCommand (
+        EngineCommandType::phraseDragStart, "start", "bass"));
+    reconnectQueue.tryEnqueue (makeEngineCommand (EngineCommandType::appConnect, "reload"));
+    expect (reconnectQueue.tryEnqueue (makeEngineCommand (
+                EngineCommandType::phraseMove, "old-ui", "bass"))
+                == CommandEnqueueResult::staleDrag,
+            "Reconnect invalidates movement from an abandoned pointer lifecycle");
 }
 
 void testFourPhrasesShareOneTransport()
@@ -646,6 +827,10 @@ void testBridgeRejectsInvalidCommandsBeforeMutation()
         [&engine] (double bpm) { engine.setBpm (bpm); },
         [&outputSelectionCount] (const std::string&) { ++outputSelectionCount; },
         [] (const std::string& outputId) { return outputId == "known-output"; },
+        {},
+        {},
+        {},
+        [] (const std::string& phraseId) { return phraseId == "bass"; },
     };
 
     const auto playResult = drift::ui::dispatchCommandEnvelope (
@@ -683,6 +868,29 @@ void testBridgeRejectsInvalidCommandsBeforeMutation()
         makeCommandEnvelope ("ui-output", "midi.selectOutput", makeOutputPayload ("missing")),
         drift::ui::CommandRejectionCode::unknownId,
         "An unknown MIDI output ID is rejected");
+    expectRejected (
+        makeCommandEnvelope ("ui-phrase", "phrase.dragStart", makePhrasePayload ("unknown")),
+        drift::ui::CommandRejectionCode::unknownId,
+        "An unknown phrase ID is rejected");
+    expectRejected (
+        makeCommandEnvelope (
+            "ui-position", "phrase.move", makeMovePayload ("bass", 1.1, 0.5)),
+        drift::ui::CommandRejectionCode::outOfRange,
+        "An out-of-range normalized position is rejected");
+
+    const auto validMove = drift::ui::validateCommandEnvelope (
+        makeCommandEnvelope (
+            "ui-valid-move", "phrase.move", makeMovePayload ("bass", 0.25, 0.75)));
+    expect (validMove.command.has_value(), "A normalized phrase move is accepted");
+    expect (validMove.command && validMove.command->phraseId == "bass",
+            "A validated move retains the stable phrase ID");
+    if (validMove.command)
+    {
+        expectNear (validMove.command->positionX, 0.25,
+                    "A validated move retains normalized x");
+        expectNear (validMove.command->positionY, 0.75,
+                    "A validated move retains normalized y");
+    }
 
     auto oversizedPayload = makeObject();
     oversizedPayload.getDynamicObject()->setProperty (
@@ -716,6 +924,10 @@ void testBridgeReconnectPreservesNativePlayback()
         [&engine] { engine.play(); },
         [&engine] { engine.stop(); },
         [&engine] (double bpm) { engine.setBpm (bpm); },
+        {},
+        {},
+        {},
+        {},
         {},
         {},
     };
@@ -773,6 +985,8 @@ int main()
     testInitialCompositionIsAuthoritative();
     testSpatialWorldFixedStepAndBoundaries();
     testSpatialWorldBoundsCatchUpWork();
+    testSpatialWorldDragLifecycle();
+    testEngineCommandQueueCoalescingAndPressure();
     testFourPhrasesShareOneTransport();
     testEngineIsIndependentOfUiUpdateTiming();
     testMidiOutputSelectionAndReplacement();

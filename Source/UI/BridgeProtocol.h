@@ -18,6 +18,9 @@ enum class BridgeCommandType
     transportStop,
     transportSetTempo,
     midiSelectOutput,
+    phraseDragStart,
+    phraseMove,
+    phraseDragEnd,
 };
 
 enum class CommandRejectionCode
@@ -30,6 +33,9 @@ enum class CommandRejectionCode
     invalidPayload,
     outOfRange,
     unknownId,
+    staleCommand,
+    queueBusy,
+    queueFull,
 };
 
 struct ValidatedBridgeCommand
@@ -38,6 +44,9 @@ struct ValidatedBridgeCommand
     std::string messageId;
     double bpm = 120.0;
     std::string outputId;
+    std::string phraseId;
+    double positionX = 0.5;
+    double positionY = 0.5;
 };
 
 struct CommandRejection
@@ -61,6 +70,10 @@ struct CommandHandlers
     std::function<void (double)> onTransportSetTempo;
     std::function<void (const std::string&)> onMidiSelectOutput;
     std::function<bool (const std::string&)> midiOutputIdExists;
+    std::function<void (const std::string&)> onPhraseDragStart;
+    std::function<void (const std::string&, double, double)> onPhraseMove;
+    std::function<void (const std::string&)> onPhraseDragEnd;
+    std::function<bool (const std::string&)> phraseIdExists;
 };
 
 CommandDispatchResult validateCommandEnvelope (const juce::var& envelope);

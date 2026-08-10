@@ -142,6 +142,32 @@ void TransportEngine::tick()
         diagnostics.schedulingWatermarkBeat, scheduledThroughBeat);
 }
 
+bool TransportEngine::beginPhraseDrag (const std::string& phraseId)
+{
+    return world.beginDrag (phraseId);
+}
+
+bool TransportEngine::moveDraggedPhrase (const std::string& phraseId,
+                                         music::NormalizedPosition position)
+{
+    return world.moveDraggedPhrase (phraseId, position);
+}
+
+bool TransportEngine::endPhraseDrag (const std::string& phraseId)
+{
+    return world.endDrag (phraseId);
+}
+
+void TransportEngine::endAllPhraseDrags()
+{
+    world.endAllDrags();
+}
+
+bool TransportEngine::containsPhrase (const std::string& phraseId) const noexcept
+{
+    return world.containsPhrase (phraseId);
+}
+
 EngineSnapshot TransportEngine::snapshot() const
 {
     const auto state = transport.snapshot();
@@ -163,6 +189,7 @@ EngineSnapshot TransportEngine::snapshot() const
             body.velocity,
             body.radius,
             body.mass,
+            body.dragged,
             state.playing,
         });
     }

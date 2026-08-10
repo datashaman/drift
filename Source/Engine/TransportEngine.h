@@ -35,6 +35,7 @@ struct PhraseSnapshot
     music::NormalizedVelocity velocity;
     double radius = 0.045;
     double mass = 1.0;
+    bool dragged = false;
     bool playing = false;
 };
 
@@ -65,6 +66,12 @@ public:
     void reschedule();
     void recordBridgeReconnect();
     void tick();
+    bool beginPhraseDrag (const std::string& phraseId);
+    bool moveDraggedPhrase (const std::string& phraseId,
+                            music::NormalizedPosition position);
+    bool endPhraseDrag (const std::string& phraseId);
+    void endAllPhraseDrags();
+    bool containsPhrase (const std::string& phraseId) const noexcept;
 
     EngineSnapshot snapshot() const;
 

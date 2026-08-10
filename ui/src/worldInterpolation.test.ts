@@ -18,7 +18,8 @@ function snapshot(sequence: number, x: number, y: number): WorldSnapshot {
         position: { x, y },
         velocity: { x: 0.03, y: 0.04 },
         radius: 0.045,
-        mass: 1.3,
+    mass: 1.3,
+    dragged: false,
         playing: true,
       },
     ],
@@ -28,6 +29,11 @@ function snapshot(sequence: number, x: number, y: number): WorldSnapshot {
       physicsCatchUpLimitHitCount: 0,
       droppedSnapshotCount: sequence * 3,
       maximumSnapshotIntervalMs: 34,
+      commandQueueDepth: 0,
+      maximumCommandQueueDepth: 0,
+      coalescedMoveCount: 0,
+      rejectedCommandCount: 0,
+      commandPressureEventCount: 0,
     },
   }
 }

@@ -194,9 +194,24 @@ h1 {
 }
 
 .phrase-world-canvas {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
+  pointer-events: none;
+}
+
+.phrase-world-pointer-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  cursor: grab;
+  touch-action: none;
+}
+
+.phrase-world-pointer-layer:active {
+  cursor: grabbing;
 }
 
 .phrase-world-accessibility {

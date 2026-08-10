@@ -17,6 +17,11 @@ export interface EngineDiagnostics {
   physicsStepCount: number
   physicsCatchUpStepCount: number
   physicsCatchUpLimitHitCount: number
+  commandQueueDepth: number
+  maximumCommandQueueDepth: number
+  coalescedMoveCount: number
+  rejectedCommandCount: number
+  commandPressureEventCount: number
 }
 
 export type PhraseRole = 'rhythm' | 'bass' | 'harmony' | 'lead'
@@ -31,6 +36,7 @@ export interface PhraseSnapshot {
   velocity: { x: number; y: number }
   radius: number
   mass: number
+  dragged: boolean
   playing: boolean
 }
 
@@ -40,6 +46,11 @@ export interface WorldDiagnostics {
   physicsCatchUpLimitHitCount: number
   droppedSnapshotCount: number
   maximumSnapshotIntervalMs: number
+  commandQueueDepth: number
+  maximumCommandQueueDepth: number
+  coalescedMoveCount: number
+  rejectedCommandCount: number
+  commandPressureEventCount: number
 }
 
 export interface WorldSnapshot {
@@ -88,6 +99,11 @@ export const initialTransportState: TransportState = {
     physicsStepCount: 0,
     physicsCatchUpStepCount: 0,
     physicsCatchUpLimitHitCount: 0,
+    commandQueueDepth: 0,
+    maximumCommandQueueDepth: 0,
+    coalescedMoveCount: 0,
+    rejectedCommandCount: 0,
+    commandPressureEventCount: 0,
   },
 }
 
@@ -102,6 +118,11 @@ export const initialWorldSnapshot: WorldSnapshot = {
     physicsCatchUpLimitHitCount: 0,
     droppedSnapshotCount: 0,
     maximumSnapshotIntervalMs: 0,
+    commandQueueDepth: 0,
+    maximumCommandQueueDepth: 0,
+    coalescedMoveCount: 0,
+    rejectedCommandCount: 0,
+    commandPressureEventCount: 0,
   },
 }
 
@@ -111,6 +132,12 @@ export type TransportCommand =
   | { type: 'transport.stop'; payload: Record<string, never> }
   | { type: 'transport.setTempo'; payload: { bpm: number } }
   | { type: 'midi.selectOutput'; payload: { outputId: string } }
+  | { type: 'phrase.dragStart'; payload: { phraseId: string } }
+  | {
+      type: 'phrase.move'
+      payload: { phraseId: string; position: { x: number; y: number } }
+    }
+  | { type: 'phrase.dragEnd'; payload: { phraseId: string } }
 
 export type CommandEnvelope = TransportCommand & {
   protocolVersion: typeof protocolVersion
@@ -224,7 +251,12 @@ function isTransportState(payload: unknown): payload is TransportState {
     typeof diagnostics.bridgeReconnectCount === 'number' &&
     typeof diagnostics.physicsStepCount === 'number' &&
     typeof diagnostics.physicsCatchUpStepCount === 'number' &&
-    typeof diagnostics.physicsCatchUpLimitHitCount === 'number'
+    typeof diagnostics.physicsCatchUpLimitHitCount === 'number' &&
+    typeof diagnostics.commandQueueDepth === 'number' &&
+    typeof diagnostics.maximumCommandQueueDepth === 'number' &&
+    typeof diagnostics.coalescedMoveCount === 'number' &&
+    typeof diagnostics.rejectedCommandCount === 'number' &&
+    typeof diagnostics.commandPressureEventCount === 'number'
   )
 }
 
@@ -259,7 +291,17 @@ function isWorldSnapshot(payload: unknown): payload is WorldSnapshot {
     !Number.isSafeInteger(diagnostics.droppedSnapshotCount) ||
     (diagnostics.droppedSnapshotCount ?? -1) < 0 ||
     !isFiniteNumber(diagnostics.maximumSnapshotIntervalMs) ||
-    diagnostics.maximumSnapshotIntervalMs < 0
+    diagnostics.maximumSnapshotIntervalMs < 0 ||
+    !Number.isSafeInteger(diagnostics.commandQueueDepth) ||
+    (diagnostics.commandQueueDepth ?? -1) < 0 ||
+    !Number.isSafeInteger(diagnostics.maximumCommandQueueDepth) ||
+    (diagnostics.maximumCommandQueueDepth ?? -1) < 0 ||
+    !Number.isSafeInteger(diagnostics.coalescedMoveCount) ||
+    (diagnostics.coalescedMoveCount ?? -1) < 0 ||
+    !Number.isSafeInteger(diagnostics.rejectedCommandCount) ||
+    (diagnostics.rejectedCommandCount ?? -1) < 0 ||
+    !Number.isSafeInteger(diagnostics.commandPressureEventCount) ||
+    (diagnostics.commandPressureEventCount ?? -1) < 0
   ) {
     return false
   }
@@ -301,7 +343,8 @@ function isWorldSnapshot(payload: unknown): payload is WorldSnapshot {
       position.y >= candidate.radius &&
       position.y <= 1 - candidate.radius &&
       isFiniteNumber(candidate.mass) &&
-      candidate.mass > 0
+      candidate.mass > 0 &&
+      typeof candidate.dragged === 'boolean'
 
     if (!valid || phraseIds.has(candidate.id as string)) return false
     phraseIds.add(candidate.id as string)

@@ -50,42 +50,99 @@ void MainComponent::timerCallback()
 
 void MainComponent::handleCommand (juce::var command)
 {
-    const drift::ui::CommandHandlers handlers {
-        [this] {
-            uiReady = true;
-            engine.recordBridgeReconnect();
-        },
-        [this] { engine.play(); },
-        [this] { engine.stop(); },
-        [this] (double bpm) { engine.setBpm (bpm); },
-        [this] (const std::string& outputId) { engine.selectMidiOutput (outputId); },
-        [this] (const std::string& outputId) {
-            const auto state = engine.snapshot();
-            return std::any_of (
-                state.midiOutput.outputs.begin(),
-                state.midiOutput.outputs.end(),
-                [&outputId] (const auto& output) { return output.id == outputId; });
-        },
-    };
-
-    const auto result = drift::ui::dispatchCommandEnvelope (command, handlers);
+    const auto result = drift::ui::validateCommandEnvelope (command);
 
     if (result.rejection.has_value())
     {
-        publishEvent ("command.rejected",
-                      drift::ui::makeCommandRejectedPayload (*result.rejection));
+        publishRejection (*result.rejection);
         return;
     }
 
-    if (result.command->type == drift::ui::BridgeCommandType::appConnect)
+    const auto& validated = *result.command;
+    if (validated.type == drift::ui::BridgeCommandType::midiSelectOutput
+        && ! validated.outputId.empty()
+        && ! availableMidiOutputIds.contains (validated.outputId))
     {
+        publishRejection ({ validated.messageId,
+                            drift::ui::CommandRejectionCode::unknownId,
+                            "The MIDI outputId is not currently available" });
+        return;
+    }
+
+    const auto isPhraseCommand
+        = validated.type == drift::ui::BridgeCommandType::phraseDragStart
+          || validated.type == drift::ui::BridgeCommandType::phraseMove
+          || validated.type == drift::ui::BridgeCommandType::phraseDragEnd;
+    if (isPhraseCommand && ! engine.containsPhrase (validated.phraseId))
+    {
+        publishRejection ({ validated.messageId,
+                            drift::ui::CommandRejectionCode::unknownId,
+                            "The phraseId is not part of the authoritative world" });
+        return;
+    }
+
+    drift::engine::EngineCommand engineCommand;
+    engineCommand.messageId = validated.messageId;
+    engineCommand.phraseId = validated.phraseId;
+    engineCommand.outputId = validated.outputId;
+    engineCommand.bpm = validated.bpm;
+    engineCommand.position = { validated.positionX, validated.positionY };
+
+    switch (validated.type)
+    {
+        case drift::ui::BridgeCommandType::appConnect:
+            engineCommand.type = drift::engine::EngineCommandType::appConnect;
+            break;
+        case drift::ui::BridgeCommandType::transportPlay:
+            engineCommand.type = drift::engine::EngineCommandType::transportPlay;
+            break;
+        case drift::ui::BridgeCommandType::transportStop:
+            engineCommand.type = drift::engine::EngineCommandType::transportStop;
+            break;
+        case drift::ui::BridgeCommandType::transportSetTempo:
+            engineCommand.type = drift::engine::EngineCommandType::transportSetTempo;
+            break;
+        case drift::ui::BridgeCommandType::midiSelectOutput:
+            engineCommand.type = drift::engine::EngineCommandType::midiSelectOutput;
+            break;
+        case drift::ui::BridgeCommandType::phraseDragStart:
+            engineCommand.type = drift::engine::EngineCommandType::phraseDragStart;
+            break;
+        case drift::ui::BridgeCommandType::phraseMove:
+            engineCommand.type = drift::engine::EngineCommandType::phraseMove;
+            break;
+        case drift::ui::BridgeCommandType::phraseDragEnd:
+            engineCommand.type = drift::engine::EngineCommandType::phraseDragEnd;
+            break;
+    }
+
+    const auto enqueueResult = engine.enqueueCommand (std::move (engineCommand));
+    if (enqueueResult == drift::engine::CommandEnqueueResult::queueBusy
+        || enqueueResult == drift::engine::CommandEnqueueResult::queueFull
+        || enqueueResult == drift::engine::CommandEnqueueResult::staleDrag)
+    {
+        const auto rejectionCode
+            = enqueueResult == drift::engine::CommandEnqueueResult::queueBusy
+                  ? drift::ui::CommandRejectionCode::queueBusy
+                  : enqueueResult == drift::engine::CommandEnqueueResult::queueFull
+                        ? drift::ui::CommandRejectionCode::queueFull
+                        : drift::ui::CommandRejectionCode::staleCommand;
+        const auto message
+            = enqueueResult == drift::engine::CommandEnqueueResult::queueBusy
+                  ? "The native command queue is busy; retry the command"
+                  : enqueueResult == drift::engine::CommandEnqueueResult::queueFull
+                        ? "The native command queue is full; retry the command"
+                        : "The drag command is stale for the current phrase lifecycle";
+        publishRejection ({ validated.messageId, rejectionCode, message }, true);
+        return;
+    }
+
+    if (validated.type == drift::ui::BridgeCommandType::appConnect)
+    {
+        uiReady = true;
         publishReady();
         publishState();
-        return;
     }
-
-    if (uiReady)
-        publishState();
 }
 
 void MainComponent::publishReady()
@@ -93,6 +150,14 @@ void MainComponent::publishReady()
     auto* payload = new juce::DynamicObject();
     payload->setProperty ("protocolVersion", drift::ui::bridgeProtocolVersion);
     publishEvent ("app.ready", juce::var { payload });
+}
+
+void MainComponent::publishRejection (drift::ui::CommandRejection rejection,
+                                      bool alreadyCounted)
+{
+    if (! alreadyCounted)
+        ++bridgeRejectedCommandCount;
+    publishEvent ("command.rejected", drift::ui::makeCommandRejectedPayload (rejection));
 }
 
 void MainComponent::publishState()
@@ -108,8 +173,10 @@ void MainComponent::publishState()
         "scheduledEventCount", static_cast<juce::int64> (state.transport.scheduledEventCount));
 
     juce::Array<juce::var> outputs;
+    availableMidiOutputIds.clear();
     for (const auto& output : state.midiOutput.outputs)
     {
+        availableMidiOutputIds.insert (output.id);
         auto* outputObject = new juce::DynamicObject();
         outputObject->setProperty ("id", juce::String { output.id });
         outputObject->setProperty ("name", juce::String { output.name });
@@ -144,6 +211,21 @@ void MainComponent::publishState()
     diagnostics->setProperty (
         "physicsCatchUpLimitHitCount",
         static_cast<juce::int64> (state.transport.diagnostics.physicsCatchUpLimitHitCount));
+    diagnostics->setProperty (
+        "commandQueueDepth", static_cast<juce::int64> (state.commandQueue.queueDepth));
+    diagnostics->setProperty (
+        "maximumCommandQueueDepth",
+        static_cast<juce::int64> (state.commandQueue.maximumQueueDepth));
+    diagnostics->setProperty (
+        "coalescedMoveCount",
+        static_cast<juce::int64> (state.commandQueue.coalescedMoveCount));
+    diagnostics->setProperty (
+        "rejectedCommandCount",
+        static_cast<juce::int64> (
+            state.commandQueue.rejectedCommandCount + bridgeRejectedCommandCount));
+    diagnostics->setProperty (
+        "commandPressureEventCount",
+        static_cast<juce::int64> (state.commandQueue.pressureEventCount));
     payload->setProperty ("diagnostics", juce::var { diagnostics });
 
     publishEvent ("transport.state", juce::var { payload });
@@ -205,6 +287,7 @@ void MainComponent::publishWorldSnapshot (const drift::engine::ControllerSnapsho
         phraseObject->setProperty ("velocity", juce::var { velocity });
         phraseObject->setProperty ("radius", phrase.radius);
         phraseObject->setProperty ("mass", phrase.mass);
+        phraseObject->setProperty ("dragged", phrase.dragged);
         phrases.add (juce::var { phraseObject });
     }
 
@@ -224,6 +307,21 @@ void MainComponent::publishWorldSnapshot (const drift::engine::ControllerSnapsho
         "droppedSnapshotCount", static_cast<juce::int64> (droppedWorldSnapshotCount));
     diagnostics->setProperty (
         "maximumSnapshotIntervalMs", maximumWorldPublicationIntervalSeconds * 1000.0);
+    diagnostics->setProperty (
+        "commandQueueDepth", static_cast<juce::int64> (state.commandQueue.queueDepth));
+    diagnostics->setProperty (
+        "maximumCommandQueueDepth",
+        static_cast<juce::int64> (state.commandQueue.maximumQueueDepth));
+    diagnostics->setProperty (
+        "coalescedMoveCount",
+        static_cast<juce::int64> (state.commandQueue.coalescedMoveCount));
+    diagnostics->setProperty (
+        "rejectedCommandCount",
+        static_cast<juce::int64> (
+            state.commandQueue.rejectedCommandCount + bridgeRejectedCommandCount));
+    diagnostics->setProperty (
+        "commandPressureEventCount",
+        static_cast<juce::int64> (state.commandQueue.pressureEventCount));
     payload->setProperty ("diagnostics", juce::var { diagnostics });
     publishEvent ("world.snapshot", juce::var { payload });
 }
