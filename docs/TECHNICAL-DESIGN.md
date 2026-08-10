@@ -202,6 +202,7 @@ Initial command set:
 
 | Command | Purpose |
 | --- | --- |
+| `app.connect` | Begin a UI session and request `app.ready` plus current authoritative state |
 | `transport.play` | Start or resume transport |
 | `transport.stop` | Stop transport and silence MIDI |
 | `transport.setTempo` | Set BPM within a safe range |
@@ -233,6 +234,7 @@ Positions and velocities use normalized world coordinates so UI size and display
 | Message | Purpose |
 | --- | --- |
 | `app.ready` | Protocol version and initial capabilities |
+| `transport.state` | Current authoritative transport and MIDI-output state |
 | `world.snapshot` | Latest authoritative world and transport state |
 | `transport.changed` | Discrete transport transition |
 | `midi.outputsChanged` | Available MIDI outputs and current selection |
@@ -597,4 +599,3 @@ The architectural boundary is decided; these mechanics remain hypotheses until t
 - Whether tempo editing is worth retaining in the POC UI.
 
 Changes to these values do not require revisiting the core decision that JUCE owns authoritative/timing-critical state and React owns presentation and direct manipulation.
-

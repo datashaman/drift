@@ -86,6 +86,8 @@ Drift is in the design and initial implementation phase. The first development b
 
 The native shell now connects React Play, Stop, BPM, and MIDI-output controls to a native-owned monotonic transport and one hard-coded looping bass phrase. Drift schedules timestamped events to the selected external MIDI destination and executes a panic path on stop, output change, failure, and shutdown. The interactive phrase world arrives in later slices.
 
+The native/UI bridge uses a validated protocol-versioned envelope. Invalid commands produce structured rejection events without mutating engine state, and every React load performs a fresh handshake that restores the current authoritative transport state without restarting playback.
+
 ## Development
 
 ### Requirements

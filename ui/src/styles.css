@@ -362,6 +362,25 @@ h1 {
   color: var(--coral);
 }
 
+.bridge-rejection {
+  margin: 0 0 16px;
+  padding: 10px;
+  border-left: 2px solid var(--coral);
+  color: var(--coral);
+  background: rgba(243, 139, 115, 0.08);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.bridge-rejection p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  line-height: 1.5;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 @keyframes drift {
   from {
     transform: translate3d(-8px, 5px, 0);
