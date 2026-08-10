@@ -145,4 +145,19 @@ if(BUILD_TESTING)
     )
     add_dependencies(DriftTests DriftUIBundle)
     add_test(NAME DriftTests COMMAND DriftTests)
+
+    add_executable(DriftStressTests
+        Tests/TransportStressTests.cpp
+        Source/UI/BridgeProtocol.cpp
+        Source/UI/BridgeProtocol.h
+    )
+    target_include_directories(DriftStressTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Source")
+    target_link_libraries(DriftStressTests
+        PRIVATE
+            DriftEngine
+            juce::juce_core
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_warning_flags
+    )
+    add_test(NAME DriftStressTests COMMAND DriftStressTests)
 endif()

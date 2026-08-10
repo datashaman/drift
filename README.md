@@ -121,6 +121,7 @@ Release builds use the equivalent `release` preset.
 - [Technical design](docs/TECHNICAL-DESIGN.md)
 - [Implementation plan](docs/IMPLEMENTATION-PLAN.md)
 - [MIDI output smoke test](docs/MIDI-SMOKE-TEST.md)
+- [Deterministic timing stress test](docs/TIMING-STRESS-TEST.md)
 - [Open issues](https://github.com/datashaman/drift/issues)
 
 ## Success criteria

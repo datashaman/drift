@@ -145,7 +145,9 @@ bool midiMessagesEqual (const std::vector<drift::music::ScheduledMidiMessage>& l
 
         if (a.type != b.type || a.channel != b.channel || a.note != b.note
             || a.velocity != b.velocity || std::abs (a.beat - b.beat) >= 1.0e-8
-            || std::abs (a.deliveryDelaySeconds - b.deliveryDelaySeconds) >= 1.0e-8)
+            || std::abs (a.deliveryDelaySeconds - b.deliveryDelaySeconds) >= 1.0e-8
+            || std::abs (a.scheduledAtSeconds - b.scheduledAtSeconds) >= 1.0e-8
+            || std::abs (a.deliveryTimeSeconds - b.deliveryTimeSeconds) >= 1.0e-8)
         {
             return false;
         }
@@ -308,6 +310,13 @@ void testEngineIsIndependentOfUiUpdateTiming()
     const auto delayedState = engine.snapshot();
     expectNear (delayedState.beatPosition, 4.0,
                 "Transport position follows the monotonic clock despite delayed observation");
+    expect (delayedState.diagnostics.lateMidiEventCount > 0,
+            "A delayed engine tick records late MIDI delivery");
+    expect (delayedState.diagnostics.maximumEngineLatenessSeconds > 1.8,
+            "Diagnostics retain the largest delayed-engine interval");
+    expect (delayedState.diagnostics.schedulingWatermarkBeat
+                >= 4.2 - drift::engine::TransportEngine::timingToleranceSeconds,
+            "The scheduling watermark advances monotonically through catch-up");
 
     const auto hasSecondLoopStart = std::any_of (
         sink.messages().begin(), sink.messages().end(), [] (const auto& message) {
@@ -510,7 +519,10 @@ void testBridgeReconnectPreservesNativePlayback()
     drift::engine::TransportEngine engine { clock, sink };
     auto connectCount = 0;
     const drift::ui::CommandHandlers handlers {
-        [&connectCount] { ++connectCount; },
+        [&connectCount, &engine] {
+            ++connectCount;
+            engine.recordBridgeReconnect();
+        },
         [&engine] { engine.play(); },
         [&engine] { engine.stop(); },
         [&engine] (double bpm) { engine.setBpm (bpm); },
@@ -531,6 +543,8 @@ void testBridgeReconnectPreservesNativePlayback()
     expect (firstConnect.command.has_value() && secondConnect.command.has_value(),
             "Every UI load can perform a fresh app.connect handshake");
     expect (connectCount == 2, "Repeated handshakes are accepted independently");
+    expect (engine.snapshot().diagnostics.bridgeReconnectCount == 2,
+            "Every accepted bridge handshake is visible in diagnostics");
     expect (engine.snapshot().playing, "UI reconnect does not stop native playback");
     expectNear (engine.snapshot().beatPosition, 1.5,
                 "UI reconnect observes ongoing monotonic native position");

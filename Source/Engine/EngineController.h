@@ -28,6 +28,7 @@ public:
     bool setBpm (double bpm);
     bool selectMidiOutput (const std::string& outputId);
     void refreshMidiOutputs();
+    void recordBridgeReconnect();
     ControllerSnapshot snapshot() const;
 
 private:

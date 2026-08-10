@@ -99,6 +99,12 @@ describe('Drift bridge interface', () => {
           beat: 2.5,
           beatPosition: 9.5,
           scheduledEventCount: 18,
+          diagnostics: {
+            schedulingWatermarkBeat: 9.7,
+            lateMidiEventCount: 0,
+            maximumEngineLatenessMs: 0.125,
+            bridgeReconnectCount: 4,
+          },
         }),
       )
     })
@@ -107,6 +113,8 @@ describe('Drift bridge interface', () => {
     expect(screen.getByText('03')).toBeTruthy()
     expect(screen.getByText('2.50')).toBeTruthy()
     expect(screen.getByText('18 events')).toBeTruthy()
+    expect(screen.getByText('9.70 beats')).toBeTruthy()
+    expect(screen.getByText('0.125 ms')).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: /stop/i }))
     expect(bridge.commands.at(-1)).toMatchObject({ type: 'transport.stop', payload: {} })

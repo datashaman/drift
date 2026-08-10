@@ -9,6 +9,13 @@ export interface MidiOutputInfo {
 
 export type MidiOutputStatus = 'disconnected' | 'connected' | 'error'
 
+export interface EngineDiagnostics {
+  schedulingWatermarkBeat: number
+  lateMidiEventCount: number
+  maximumEngineLatenessMs: number
+  bridgeReconnectCount: number
+}
+
 export interface TransportState {
   playing: boolean
   bpm: number
@@ -20,6 +27,7 @@ export interface TransportState {
   selectedMidiOutputId: string
   midiStatus: MidiOutputStatus
   midiError: string
+  diagnostics: EngineDiagnostics
 }
 
 export const initialTransportState: TransportState = {
@@ -33,6 +41,12 @@ export const initialTransportState: TransportState = {
   selectedMidiOutputId: '',
   midiStatus: 'disconnected',
   midiError: '',
+  diagnostics: {
+    schedulingWatermarkBeat: 0,
+    lateMidiEventCount: 0,
+    maximumEngineLatenessMs: 0,
+    bridgeReconnectCount: 0,
+  },
 }
 
 export type TransportCommand =
@@ -112,6 +126,7 @@ function isTransportState(payload: unknown): payload is TransportState {
   if (typeof payload !== 'object' || payload === null) return false
 
   const state = payload as Partial<TransportState>
+  const diagnostics = state.diagnostics as Partial<EngineDiagnostics> | undefined
   const midiOutputsAreValid =
     Array.isArray(state.midiOutputs) &&
     state.midiOutputs.every(
@@ -134,7 +149,13 @@ function isTransportState(payload: unknown): payload is TransportState {
     (state.midiStatus === 'disconnected' ||
       state.midiStatus === 'connected' ||
       state.midiStatus === 'error') &&
-    typeof state.midiError === 'string'
+    typeof state.midiError === 'string' &&
+    typeof diagnostics === 'object' &&
+    diagnostics !== null &&
+    typeof diagnostics.schedulingWatermarkBeat === 'number' &&
+    typeof diagnostics.lateMidiEventCount === 'number' &&
+    typeof diagnostics.maximumEngineLatenessMs === 'number' &&
+    typeof diagnostics.bridgeReconnectCount === 'number'
   )
 }
 

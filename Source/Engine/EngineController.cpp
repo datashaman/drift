@@ -57,6 +57,12 @@ void EngineController::refreshMidiOutputs()
     midiOutput.refreshOutputs();
 }
 
+void EngineController::recordBridgeReconnect()
+{
+    const std::scoped_lock lock { mutex };
+    engine.recordBridgeReconnect();
+}
+
 ControllerSnapshot EngineController::snapshot() const
 {
     const std::scoped_lock lock { mutex };
