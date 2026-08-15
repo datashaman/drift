@@ -27,6 +27,7 @@ public:
 
     void play();
     void stop();
+    void setMotionPaused (bool paused);
     bool setBpm (double bpm);
     bool selectMidiOutput (const std::string& outputId);
     CommandEnqueueResult enqueueCommand (EngineCommand command);

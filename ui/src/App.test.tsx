@@ -49,6 +49,7 @@ function worldEvent(
     payload: {
       sequence,
       engineTimeMs: 1250,
+      motionPaused: false,
       transport: { playing: true, bpm: 120, bar: 1, beat: 3.5 },
       diagnostics: {
         physicsStepCount: 150,
@@ -221,6 +222,7 @@ describe('Drift bridge interface', () => {
           },
         }),
       )
+      bridge.publish(worldEvent(1, { motionPaused: false }))
     })
 
     expect(screen.getByText('Playing')).toBeTruthy()
@@ -229,6 +231,18 @@ describe('Drift bridge interface', () => {
     expect(screen.getByText('18 events')).toBeTruthy()
     expect(screen.getByText('9.70 beats')).toBeTruthy()
     expect(screen.getByText('0.125 ms')).toBeTruthy()
+    expect(screen.getByText('Moving')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: /freeze motion/i }))
+    expect(bridge.commands.at(-1)).toMatchObject({
+      type: 'world.setMotionPaused',
+      payload: { paused: true },
+    })
+
+    act(() => bridge.publish(worldEvent(2, { motionPaused: true })))
+    expect(screen.getByRole('button', { name: /resume motion/i })).toBeTruthy()
+    expect(screen.getByText('Frozen')).toBeTruthy()
+    expect(screen.getByText(/Motion frozen. Drag phrases/)).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: /stop/i }))
     expect(bridge.commands.at(-1)).toMatchObject({ type: 'transport.stop', payload: {} })
@@ -289,6 +303,11 @@ describe('Drift bridge interface', () => {
     const invalidCollision = worldEvent(9)
     invalidCollision.payload.collisions[0].targetPhraseId = 'unknown'
     eventListener?.(invalidCollision)
+    expect(receivedWorldSequence).toBe(5)
+
+    const invalidMotion = worldEvent(10)
+    invalidMotion.payload.motionPaused = 'yes' as unknown as boolean
+    eventListener?.(invalidMotion)
     expect(receivedWorldSequence).toBe(5)
   })
 
@@ -400,7 +419,7 @@ describe('Drift bridge interface', () => {
     const selectedWorld = worldEvent(5)
     selectedWorld.payload.phrases[1].dragged = true
     act(() => bridge.publish(selectedWorld))
-    expect(screen.getByText(/BASS · A · playing · selected/)).toBeTruthy()
+    expect(screen.getByText(/BASS · A · playing · moving · selected/)).toBeTruthy()
   })
 
   it('ends an interrupted pointer lifecycle without throwing', () => {

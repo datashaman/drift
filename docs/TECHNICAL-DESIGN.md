@@ -204,7 +204,8 @@ Initial command set:
 | --- | --- |
 | `app.connect` | Begin a UI session and request `app.ready` plus current authoritative state |
 | `transport.play` | Start or resume transport |
-| `transport.stop` | Stop transport and silence MIDI |
+| `transport.stop` | Stop transport, silence MIDI, and freeze world motion |
+| `world.setMotionPaused` | Freeze or resume autonomous motion without changing playback |
 | `transport.setTempo` | Set BPM within a safe range |
 | `midi.selectOutput` | Select an available output by stable runtime ID |
 | `phrase.dragStart` | Begin direct manipulation of a phrase |
@@ -339,6 +340,8 @@ For each fixed physics step:
 8. Produce musical intents when thresholds or contact events require them.
 
 The collision system distinguishes a new contact from continued overlap. Cooldown belongs to the phrase pair, not only to an individual phrase.
+
+World motion has an authoritative paused state independent of musical transport. A paused step skips autonomous position integration but continues contact detection and cooldown progression, so direct manipulation can still create musical collisions while playback and MIDI scheduling continue. Untouched bodies retain velocity across the pause. Moving a body while paused clears that body's velocity so it remains catchable when motion resumes. Transport Stop forces motion paused; Play forces motion resumed.
 
 ### 9.2 Intent and quantization pipeline
 

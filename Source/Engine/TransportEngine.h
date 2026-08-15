@@ -57,6 +57,7 @@ struct CollisionSnapshot
 struct EngineSnapshot
 {
     bool playing = false;
+    bool motionPaused = true;
     double bpm = 120.0;
     double beatPosition = 0.0;
     int bar = 1;
@@ -91,6 +92,7 @@ public:
 
     void play();
     void stop();
+    void setMotionPaused (bool paused);
     bool setBpm (double bpm);
     void reschedule();
     void recordBridgeReconnect();

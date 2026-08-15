@@ -32,6 +32,7 @@ function snapshot(sequence: number, dragged = false): WorldSnapshot {
   return {
     sequence,
     engineTimeMs: sequence * 33,
+    motionPaused: false,
     transport: { playing: true, bpm: 120, bar: 1, beat: 1 },
     phrases: [{ ...bass, dragged }],
     collisions: [],

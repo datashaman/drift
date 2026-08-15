@@ -7,6 +7,7 @@ function snapshot(sequence: number, x: number, y: number): WorldSnapshot {
   return {
     sequence,
     engineTimeMs: sequence * 33,
+    motionPaused: false,
     transport: { playing: true, bpm: 120, bar: 1, beat: 1 },
     phrases: [
       {

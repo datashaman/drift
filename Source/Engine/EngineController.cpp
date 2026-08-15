@@ -30,6 +30,12 @@ void EngineController::stop()
     engine.stop();
 }
 
+void EngineController::setMotionPaused (bool paused)
+{
+    const std::scoped_lock lock { mutex };
+    engine.setMotionPaused (paused);
+}
+
 bool EngineController::setBpm (double bpm)
 {
     const std::scoped_lock lock { mutex };
@@ -107,6 +113,9 @@ void EngineController::applyCommand (const EngineCommand& command)
             break;
         case EngineCommandType::transportStop:
             engine.stop();
+            break;
+        case EngineCommandType::worldSetMotionPaused:
+            engine.setMotionPaused (command.motionPaused);
             break;
         case EngineCommandType::transportSetTempo:
             engine.setBpm (command.bpm);

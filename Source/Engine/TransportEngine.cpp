@@ -61,10 +61,12 @@ TransportEngine::TransportEngine (Clock& clockIn, music::MidiSink& sinkIn)
       phrases (music::makeInitialComposition()),
       world (makePhraseBodies (phrases), clockIn.nowSeconds())
 {
+    world.setMotionPaused (true);
 }
 
 void TransportEngine::play()
 {
+    world.setMotionPaused (false);
     if (transport.snapshot().playing)
         return;
 
@@ -78,6 +80,7 @@ void TransportEngine::play()
 
 void TransportEngine::stop()
 {
+    world.setMotionPaused (true);
     transport.stop();
     scheduledThroughBeat = 0.0;
     sink.clear();
@@ -86,6 +89,14 @@ void TransportEngine::stop()
         phrase.pendingVariantId.reset();
         phrase.pendingVariantApplyBeat.reset();
     }
+}
+
+void TransportEngine::setMotionPaused (bool paused)
+{
+    if (! paused && ! transport.snapshot().playing)
+        return;
+
+    world.setMotionPaused (paused);
 }
 
 bool TransportEngine::setBpm (double bpm)
@@ -346,6 +357,7 @@ EngineSnapshot TransportEngine::snapshot() const
 
     return {
         state.playing,
+        world.motionPaused(),
         state.bpm,
         state.beatPosition,
         state.bar,

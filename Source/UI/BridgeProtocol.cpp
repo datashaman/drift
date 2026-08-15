@@ -40,6 +40,7 @@ std::optional<BridgeCommandType> commandTypeForName (const juce::String& type)
     if (type == "app.connect") return BridgeCommandType::appConnect;
     if (type == "transport.play") return BridgeCommandType::transportPlay;
     if (type == "transport.stop") return BridgeCommandType::transportStop;
+    if (type == "world.setMotionPaused") return BridgeCommandType::worldSetMotionPaused;
     if (type == "transport.setTempo") return BridgeCommandType::transportSetTempo;
     if (type == "midi.selectOutput") return BridgeCommandType::midiSelectOutput;
     if (type == "phrase.dragStart") return BridgeCommandType::phraseDragStart;
@@ -97,7 +98,16 @@ CommandDispatchResult validateCommandEnvelope (const juce::var& envelope)
     command.type = *commandType;
     command.messageId = messageId.toStdString();
 
-    if (*commandType == BridgeCommandType::transportSetTempo)
+    if (*commandType == BridgeCommandType::worldSetMotionPaused)
+    {
+        const auto paused = payloadObject->getProperty ("paused");
+        if (! paused.isBool())
+            return reject (command.messageId, CommandRejectionCode::invalidPayload,
+                           "The motion payload requires a boolean paused value");
+
+        command.motionPaused = static_cast<bool> (paused);
+    }
+    else if (*commandType == BridgeCommandType::transportSetTempo)
     {
         const auto bpm = payloadObject->getProperty ("bpm");
 
@@ -238,6 +248,10 @@ CommandDispatchResult dispatchCommandEnvelope (const juce::var& envelope,
             break;
         case BridgeCommandType::transportStop:
             if (handlers.onTransportStop) handlers.onTransportStop();
+            break;
+        case BridgeCommandType::worldSetMotionPaused:
+            if (handlers.onWorldSetMotionPaused)
+                handlers.onWorldSetMotionPaused (command.motionPaused);
             break;
         case BridgeCommandType::transportSetTempo:
             if (handlers.onTransportSetTempo) handlers.onTransportSetTempo (command.bpm);

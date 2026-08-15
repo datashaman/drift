@@ -339,7 +339,7 @@ export function PhraseWorld({
       <ul className="phrase-world-accessibility" aria-label="Phrase world">
         {snapshot.phrases.map((phrase) => (
           <li data-phrase-id={phrase.id} key={phrase.id}>
-            {phrase.name} · {variantLabel(phrase)} · {phrase.playing ? 'playing' : 'stopped'} · {phrase.dragged ? 'selected' : 'free'}
+            {phrase.name} · {variantLabel(phrase)} · {phrase.playing ? 'playing' : 'stopped'} · {snapshot.motionPaused ? 'motion frozen' : 'moving'} · {phrase.dragged ? 'selected' : 'free'}
           </li>
         ))}
       </ul>

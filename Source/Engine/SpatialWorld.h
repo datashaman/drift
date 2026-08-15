@@ -52,6 +52,8 @@ public:
     SpatialWorld (std::vector<PhraseBody> bodiesIn, double initialTimeSeconds);
 
     void advanceTo (double nowSeconds);
+    void setMotionPaused (bool paused) noexcept;
+    bool motionPaused() const noexcept;
     bool beginDrag (const std::string& phraseId);
     bool moveDraggedPhrase (const std::string& phraseId,
                             music::NormalizedPosition position);
@@ -86,6 +88,7 @@ private:
                                 const std::string& secondPhraseId);
 
     std::vector<PhraseBody> phraseBodies;
+    bool paused = false;
     double lastUpdateSeconds = 0.0;
     double accumulatorSeconds = 0.0;
     std::size_t worldRevision = 0;

@@ -17,6 +17,7 @@ enum class EngineCommandType
     appConnect,
     transportPlay,
     transportStop,
+    worldSetMotionPaused,
     transportSetTempo,
     midiSelectOutput,
     phraseDragStart,
@@ -33,6 +34,7 @@ struct EngineCommand
     std::string dragSessionId;
     std::string outputId;
     double bpm = 120.0;
+    bool motionPaused = false;
     music::NormalizedPosition position;
     music::NormalizedVelocity velocity;
 };

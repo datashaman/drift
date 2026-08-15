@@ -16,6 +16,7 @@ enum class BridgeCommandType
     appConnect,
     transportPlay,
     transportStop,
+    worldSetMotionPaused,
     transportSetTempo,
     midiSelectOutput,
     phraseDragStart,
@@ -44,6 +45,7 @@ struct ValidatedBridgeCommand
     BridgeCommandType type = BridgeCommandType::appConnect;
     std::string messageId;
     double bpm = 120.0;
+    bool motionPaused = false;
     std::string outputId;
     std::string phraseId;
     std::string dragSessionId;
@@ -79,6 +81,7 @@ struct CommandHandlers
     std::function<void (const std::string&)> onPhraseDragEnd;
     std::function<void (const std::string&, double, double)> onPhraseThrow;
     std::function<bool (const std::string&)> phraseIdExists;
+    std::function<void (bool)> onWorldSetMotionPaused;
 };
 
 CommandDispatchResult validateCommandEnvelope (const juce::var& envelope);

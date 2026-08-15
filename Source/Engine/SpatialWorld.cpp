@@ -64,6 +64,19 @@ void SpatialWorld::advanceTo (double nowSeconds)
     }
 }
 
+void SpatialWorld::setMotionPaused (bool shouldPause) noexcept
+{
+    if (paused == shouldPause)
+        return;
+
+    paused = shouldPause;
+}
+
+bool SpatialWorld::motionPaused() const noexcept
+{
+    return paused;
+}
+
 bool SpatialWorld::beginDrag (const std::string& phraseId)
 {
     auto* body = findBody (phraseId);
@@ -86,6 +99,8 @@ bool SpatialWorld::moveDraggedPhrase (const std::string& phraseId,
     const auto maximum = 1.0 - minimum;
     body->position.x = std::clamp (position.x, minimum, maximum);
     body->position.y = std::clamp (position.y, minimum, maximum);
+    if (paused)
+        body->velocity = {};
     ++worldRevision;
     return true;
 }
@@ -112,7 +127,7 @@ bool SpatialWorld::throwPhrase (const std::string& phraseId,
     }
 
     const auto speed = std::hypot (velocity.x, velocity.y);
-    if (speed < stationaryVelocityThreshold)
+    if (paused || speed < stationaryVelocityThreshold)
     {
         velocity = {};
     }
@@ -192,7 +207,7 @@ void SpatialWorld::integrateStep()
 
     for (auto& body : phraseBodies)
     {
-        if (body.dragged)
+        if (paused || body.dragged)
             continue;
 
         integrateAxis (body.position.x, body.velocity.x, body.radius);
