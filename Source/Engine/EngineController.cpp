@@ -36,6 +36,12 @@ void EngineController::setMotionPaused (bool paused)
     engine.setMotionPaused (paused);
 }
 
+void EngineController::setProximityAuditionMode (ProximityAuditionMode mode)
+{
+    const std::scoped_lock lock { mutex };
+    engine.setProximityAuditionMode (mode);
+}
+
 bool EngineController::setBpm (double bpm)
 {
     const std::scoped_lock lock { mutex };
@@ -116,6 +122,9 @@ void EngineController::applyCommand (const EngineCommand& command)
             break;
         case EngineCommandType::worldSetMotionPaused:
             engine.setMotionPaused (command.motionPaused);
+            break;
+        case EngineCommandType::proximitySetAuditionMode:
+            engine.setProximityAuditionMode (command.proximityMode);
             break;
         case EngineCommandType::transportSetTempo:
             engine.setBpm (command.bpm);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Music/Phrase.h"
+#include "Engine/ProximityRhythmMapping.h"
 
 #include <atomic>
 #include <cstddef>
@@ -18,6 +19,7 @@ enum class EngineCommandType
     transportPlay,
     transportStop,
     worldSetMotionPaused,
+    proximitySetAuditionMode,
     transportSetTempo,
     midiSelectOutput,
     phraseDragStart,
@@ -35,6 +37,7 @@ struct EngineCommand
     std::string outputId;
     double bpm = 120.0;
     bool motionPaused = false;
+    ProximityAuditionMode proximityMode = ProximityAuditionMode::rhythmProfiles;
     music::NormalizedPosition position;
     music::NormalizedVelocity velocity;
 };

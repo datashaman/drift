@@ -24,6 +24,13 @@ export interface EngineDiagnostics {
   speedIntentQueuedCount: number
   speedIntentSuppressedCount: number
   speedTransitionAppliedCount: number
+  proximityLevelChangeCount: number
+  proximityIntentQueuedCount: number
+  proximityIntentCoalescedCount: number
+  proximityIntentSuppressedCount: number
+  proximityTransitionAppliedCount: number
+  proximityModeQueuedCount: number
+  proximityModeAppliedCount: number
   commandQueueDepth: number
   maximumCommandQueueDepth: number
   coalescedMoveCount: number
@@ -33,6 +40,8 @@ export interface EngineDiagnostics {
 
 export type PhraseRole = 'rhythm' | 'bass' | 'harmony' | 'lead'
 export type ActivityBand = 'sparse' | 'normal' | 'active'
+export type CouplingLevel = 'loose' | 'linked' | 'tight'
+export type ProximityAuditionMode = 'rhythmProfiles' | 'sharedAccents'
 
 export interface PhraseSnapshot {
   id: string
@@ -65,6 +74,13 @@ export interface WorldDiagnostics {
   speedIntentQueuedCount: number
   speedIntentSuppressedCount: number
   speedTransitionAppliedCount: number
+  proximityLevelChangeCount: number
+  proximityIntentQueuedCount: number
+  proximityIntentCoalescedCount: number
+  proximityIntentSuppressedCount: number
+  proximityTransitionAppliedCount: number
+  proximityModeQueuedCount: number
+  proximityModeAppliedCount: number
   droppedSnapshotCount: number
   maximumSnapshotIntervalMs: number
   commandQueueDepth: number
@@ -82,10 +98,23 @@ export interface CollisionSnapshot {
   cooldownRemainingMs: number
 }
 
+export interface ProximityPairSnapshot {
+  firstPhraseId: string
+  secondPhraseId: string
+  rawProximity: number
+  smoothedProximity: number
+  couplingLevel: CouplingLevel
+  pendingCouplingLevel: CouplingLevel | null
+  pendingApplyBeat: number | null
+}
+
 export interface WorldSnapshot {
   sequence: number
   engineTimeMs: number
   motionPaused: boolean
+  proximityMode: ProximityAuditionMode
+  pendingProximityMode: ProximityAuditionMode | null
+  pendingProximityModeApplyBeat: number | null
   transport: {
     playing: boolean
     bpm: number
@@ -94,6 +123,7 @@ export interface WorldSnapshot {
   }
   phrases: PhraseSnapshot[]
   collisions: CollisionSnapshot[]
+  proximityPairs: ProximityPairSnapshot[]
   diagnostics: WorldDiagnostics
 }
 
@@ -137,6 +167,13 @@ export const initialTransportState: TransportState = {
     speedIntentQueuedCount: 0,
     speedIntentSuppressedCount: 0,
     speedTransitionAppliedCount: 0,
+    proximityLevelChangeCount: 0,
+    proximityIntentQueuedCount: 0,
+    proximityIntentCoalescedCount: 0,
+    proximityIntentSuppressedCount: 0,
+    proximityTransitionAppliedCount: 0,
+    proximityModeQueuedCount: 0,
+    proximityModeAppliedCount: 0,
     commandQueueDepth: 0,
     maximumCommandQueueDepth: 0,
     coalescedMoveCount: 0,
@@ -149,9 +186,13 @@ export const initialWorldSnapshot: WorldSnapshot = {
   sequence: 0,
   engineTimeMs: 0,
   motionPaused: true,
+  proximityMode: 'rhythmProfiles',
+  pendingProximityMode: null,
+  pendingProximityModeApplyBeat: null,
   transport: { playing: false, bpm: 120, bar: 1, beat: 1 },
   phrases: [],
   collisions: [],
+  proximityPairs: [],
   diagnostics: {
     physicsStepCount: 0,
     physicsCatchUpStepCount: 0,
@@ -163,6 +204,13 @@ export const initialWorldSnapshot: WorldSnapshot = {
     speedIntentQueuedCount: 0,
     speedIntentSuppressedCount: 0,
     speedTransitionAppliedCount: 0,
+    proximityLevelChangeCount: 0,
+    proximityIntentQueuedCount: 0,
+    proximityIntentCoalescedCount: 0,
+    proximityIntentSuppressedCount: 0,
+    proximityTransitionAppliedCount: 0,
+    proximityModeQueuedCount: 0,
+    proximityModeAppliedCount: 0,
     droppedSnapshotCount: 0,
     maximumSnapshotIntervalMs: 0,
     commandQueueDepth: 0,
@@ -178,6 +226,7 @@ export type TransportCommand =
   | { type: 'transport.play'; payload: Record<string, never> }
   | { type: 'transport.stop'; payload: Record<string, never> }
   | { type: 'world.setMotionPaused'; payload: { paused: boolean } }
+  | { type: 'proximity.setAuditionMode'; payload: { mode: ProximityAuditionMode } }
   | { type: 'transport.setTempo'; payload: { bpm: number } }
   | { type: 'midi.selectOutput'; payload: { outputId: string } }
   | {
@@ -325,6 +374,13 @@ function isTransportState(payload: unknown): payload is TransportState {
     typeof diagnostics.speedIntentQueuedCount === 'number' &&
     typeof diagnostics.speedIntentSuppressedCount === 'number' &&
     typeof diagnostics.speedTransitionAppliedCount === 'number' &&
+    typeof diagnostics.proximityLevelChangeCount === 'number' &&
+    typeof diagnostics.proximityIntentQueuedCount === 'number' &&
+    typeof diagnostics.proximityIntentCoalescedCount === 'number' &&
+    typeof diagnostics.proximityIntentSuppressedCount === 'number' &&
+    typeof diagnostics.proximityTransitionAppliedCount === 'number' &&
+    typeof diagnostics.proximityModeQueuedCount === 'number' &&
+    typeof diagnostics.proximityModeAppliedCount === 'number' &&
     typeof diagnostics.commandQueueDepth === 'number' &&
     typeof diagnostics.maximumCommandQueueDepth === 'number' &&
     typeof diagnostics.coalescedMoveCount === 'number' &&
@@ -347,6 +403,14 @@ function isWorldSnapshot(payload: unknown): payload is WorldSnapshot {
     !isFiniteNumber(snapshot.engineTimeMs) ||
     snapshot.engineTimeMs < 0 ||
     typeof snapshot.motionPaused !== 'boolean' ||
+    !['rhythmProfiles', 'sharedAccents'].includes(snapshot.proximityMode ?? '') ||
+    (snapshot.pendingProximityMode !== null &&
+      !['rhythmProfiles', 'sharedAccents'].includes(snapshot.pendingProximityMode ?? '')) ||
+    (snapshot.pendingProximityModeApplyBeat !== null &&
+      (!isFiniteNumber(snapshot.pendingProximityModeApplyBeat) ||
+        snapshot.pendingProximityModeApplyBeat < 0)) ||
+    ((snapshot.pendingProximityMode === null) !==
+      (snapshot.pendingProximityModeApplyBeat === null)) ||
     typeof transport !== 'object' ||
     transport === null ||
     typeof transport.playing !== 'boolean' ||
@@ -355,6 +419,7 @@ function isWorldSnapshot(payload: unknown): payload is WorldSnapshot {
     !isFiniteNumber(transport.beat) ||
     !Array.isArray(snapshot.phrases) ||
     !Array.isArray(snapshot.collisions) ||
+    !Array.isArray(snapshot.proximityPairs) ||
     typeof diagnostics !== 'object' ||
     diagnostics === null ||
     !Number.isSafeInteger(diagnostics.physicsStepCount) ||
@@ -377,6 +442,20 @@ function isWorldSnapshot(payload: unknown): payload is WorldSnapshot {
     (diagnostics.speedIntentSuppressedCount ?? -1) < 0 ||
     !Number.isSafeInteger(diagnostics.speedTransitionAppliedCount) ||
     (diagnostics.speedTransitionAppliedCount ?? -1) < 0 ||
+    !Number.isSafeInteger(diagnostics.proximityLevelChangeCount) ||
+    (diagnostics.proximityLevelChangeCount ?? -1) < 0 ||
+    !Number.isSafeInteger(diagnostics.proximityIntentQueuedCount) ||
+    (diagnostics.proximityIntentQueuedCount ?? -1) < 0 ||
+    !Number.isSafeInteger(diagnostics.proximityIntentCoalescedCount) ||
+    (diagnostics.proximityIntentCoalescedCount ?? -1) < 0 ||
+    !Number.isSafeInteger(diagnostics.proximityIntentSuppressedCount) ||
+    (diagnostics.proximityIntentSuppressedCount ?? -1) < 0 ||
+    !Number.isSafeInteger(diagnostics.proximityTransitionAppliedCount) ||
+    (diagnostics.proximityTransitionAppliedCount ?? -1) < 0 ||
+    !Number.isSafeInteger(diagnostics.proximityModeQueuedCount) ||
+    (diagnostics.proximityModeQueuedCount ?? -1) < 0 ||
+    !Number.isSafeInteger(diagnostics.proximityModeAppliedCount) ||
+    (diagnostics.proximityModeAppliedCount ?? -1) < 0 ||
     !Number.isSafeInteger(diagnostics.droppedSnapshotCount) ||
     (diagnostics.droppedSnapshotCount ?? -1) < 0 ||
     !isFiniteNumber(diagnostics.maximumSnapshotIntervalMs) ||
@@ -457,8 +536,8 @@ function isWorldSnapshot(payload: unknown): payload is WorldSnapshot {
 
   if (!phrasesAreValid) return false
 
-  const pairIds = new Set<string>()
-  return snapshot.collisions.every((collision) => {
+  const collisionPairIds = new Set<string>()
+  const collisionsAreValid = snapshot.collisions.every((collision) => {
     if (typeof collision !== 'object' || collision === null) return false
 
     const candidate = collision as Partial<CollisionSnapshot>
@@ -475,8 +554,36 @@ function isWorldSnapshot(payload: unknown): payload is WorldSnapshot {
       isFiniteNumber(candidate.cooldownRemainingMs) &&
       candidate.cooldownRemainingMs >= 0
 
-    if (!valid || pairIds.has(pairId)) return false
-    pairIds.add(pairId)
+    if (!valid || collisionPairIds.has(pairId)) return false
+    collisionPairIds.add(pairId)
+    return true
+  })
+  if (!collisionsAreValid) return false
+
+  const proximityPairIds = new Set<string>()
+  return snapshot.proximityPairs.every((pair) => {
+    if (typeof pair !== 'object' || pair === null) return false
+    const candidate = pair as Partial<ProximityPairSnapshot>
+    const pairId = `${candidate.firstPhraseId}:${candidate.secondPhraseId}`
+    const valid =
+      isMessageId(candidate.firstPhraseId) &&
+      isMessageId(candidate.secondPhraseId) &&
+      candidate.firstPhraseId < candidate.secondPhraseId &&
+      phraseIds.has(candidate.firstPhraseId) &&
+      phraseIds.has(candidate.secondPhraseId) &&
+      isFiniteNumber(candidate.rawProximity) &&
+      candidate.rawProximity >= 0 && candidate.rawProximity <= 1 &&
+      isFiniteNumber(candidate.smoothedProximity) &&
+      candidate.smoothedProximity >= 0 && candidate.smoothedProximity <= 1 &&
+      ['loose', 'linked', 'tight'].includes(candidate.couplingLevel ?? '') &&
+      (candidate.pendingCouplingLevel === null ||
+        ['loose', 'linked', 'tight'].includes(candidate.pendingCouplingLevel ?? '')) &&
+      (candidate.pendingApplyBeat === null ||
+        (isFiniteNumber(candidate.pendingApplyBeat) && candidate.pendingApplyBeat >= 0)) &&
+      ((candidate.pendingCouplingLevel === null) ===
+        (candidate.pendingApplyBeat === null))
+    if (!valid || proximityPairIds.has(pairId)) return false
+    proximityPairIds.add(pairId)
     return true
   })
 }

@@ -45,6 +45,7 @@ struct SimulationResult
     int dragMoveCount = 0;
     int throwCount = 0;
     int motionPauseToggleCount = 0;
+    int proximityModeToggleCount = 0;
 };
 
 juce::var makeConnectCommand (int sequence)
@@ -68,6 +69,7 @@ SimulationResult runSimulation (bool stressUi)
             engine.endAllPhraseDrags();
             engine.recordBridgeReconnect();
         },
+        {},
         {},
         {},
         {},
@@ -120,6 +122,16 @@ SimulationResult runSimulation (bool stressUi)
                 const auto direction = cycle % 2 == 0 ? 1.0 : -1.0;
                 if (engine.throwPhrase (phraseId, { 0.8 * direction, -0.45 }))
                     ++result.throwCount;
+            }
+
+            if (tick % 30000 == 5000)
+            {
+                const auto modeCycle = tick / 30000;
+                engine.setProximityAuditionMode (
+                    modeCycle % 2 == 0
+                        ? drift::engine::ProximityAuditionMode::sharedAccents
+                        : drift::engine::ProximityAuditionMode::rhythmProfiles);
+                ++result.proximityModeToggleCount;
             }
         }
 
@@ -307,6 +319,13 @@ int main()
                  && stressed.snapshot.diagnostics.speedIntentQueuedCount >= 1
                  && stressed.snapshot.diagnostics.speedTransitionAppliedCount >= 1,
              "the stress run did not exercise quantized speed activity transitions");
+    require (stressed.proximityModeToggleCount >= 10
+                 && stressed.snapshot.diagnostics.proximityModeAppliedCount >= 9,
+             "the stress run did not repeatedly audition both proximity modes");
+    require (stressed.snapshot.diagnostics.proximityLevelChangeCount >= 1
+                 && stressed.snapshot.diagnostics.proximityIntentQueuedCount >= 1
+                 && stressed.snapshot.diagnostics.proximityTransitionAppliedCount >= 1,
+             "the stress run did not exercise quantized proximity coupling");
 
     std::cout << std::fixed << std::setprecision (9)
               << "Drift deterministic timing stress report\n"
@@ -318,6 +337,7 @@ int main()
               << "Drag moves: " << stressed.dragMoveCount << '\n'
               << "Throws: " << stressed.throwCount << '\n'
               << "Motion pause toggles: " << stressed.motionPauseToggleCount << '\n'
+              << "Proximity mode toggles: " << stressed.proximityModeToggleCount << '\n'
               << "Bridge reconnects: "
               << stressed.snapshot.diagnostics.bridgeReconnectCount << '\n'
               << "Physics steps: " << stressed.snapshot.diagnostics.physicsStepCount << '\n'
@@ -339,6 +359,18 @@ int main()
               << stressed.snapshot.diagnostics.speedIntentSuppressedCount << '\n'
               << "Speed transitions applied: "
               << stressed.snapshot.diagnostics.speedTransitionAppliedCount << '\n'
+              << "Proximity level changes: "
+              << stressed.snapshot.diagnostics.proximityLevelChangeCount << '\n'
+              << "Proximity intents queued: "
+              << stressed.snapshot.diagnostics.proximityIntentQueuedCount << '\n'
+              << "Proximity intents coalesced: "
+              << stressed.snapshot.diagnostics.proximityIntentCoalescedCount << '\n'
+              << "Proximity intents suppressed: "
+              << stressed.snapshot.diagnostics.proximityIntentSuppressedCount << '\n'
+              << "Proximity transitions applied: "
+              << stressed.snapshot.diagnostics.proximityTransitionAppliedCount << '\n'
+              << "Proximity modes applied: "
+              << stressed.snapshot.diagnostics.proximityModeAppliedCount << '\n'
               << "Recorded MIDI messages: " << stressed.messages.size() << '\n'
               << "Scheduling watermark: "
               << stressed.snapshot.diagnostics.schedulingWatermarkBeat << " beats\n"

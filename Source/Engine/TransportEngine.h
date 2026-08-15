@@ -2,6 +2,7 @@
 
 #include "Engine/Clock.h"
 #include "Engine/SpatialWorld.h"
+#include "Engine/ProximityRhythmMapping.h"
 #include "Engine/SpeedActivityMapping.h"
 #include "Music/MidiSink.h"
 #include "Music/Phrase.h"
@@ -32,6 +33,13 @@ struct EngineDiagnostics
     std::size_t speedIntentQueuedCount = 0;
     std::size_t speedIntentSuppressedCount = 0;
     std::size_t speedTransitionAppliedCount = 0;
+    std::size_t proximityLevelChangeCount = 0;
+    std::size_t proximityIntentQueuedCount = 0;
+    std::size_t proximityIntentCoalescedCount = 0;
+    std::size_t proximityIntentSuppressedCount = 0;
+    std::size_t proximityTransitionAppliedCount = 0;
+    std::size_t proximityModeQueuedCount = 0;
+    std::size_t proximityModeAppliedCount = 0;
 };
 
 struct PhraseSnapshot
@@ -64,6 +72,17 @@ struct CollisionSnapshot
     double cooldownRemainingSeconds = 0.0;
 };
 
+struct ProximityPairSnapshot
+{
+    std::string firstPhraseId;
+    std::string secondPhraseId;
+    double rawProximity = 0.0;
+    double smoothedProximity = 0.0;
+    CouplingLevel couplingLevel = CouplingLevel::loose;
+    std::optional<CouplingLevel> pendingCouplingLevel;
+    std::optional<double> pendingApplyBeat;
+};
+
 struct EngineSnapshot
 {
     bool playing = false;
@@ -77,6 +96,10 @@ struct EngineSnapshot
     std::size_t scheduledEventCount = 0;
     std::vector<PhraseSnapshot> phrases;
     std::vector<CollisionSnapshot> collisions;
+    std::vector<ProximityPairSnapshot> proximityPairs;
+    ProximityAuditionMode proximityMode = ProximityAuditionMode::rhythmProfiles;
+    std::optional<ProximityAuditionMode> pendingProximityMode;
+    std::optional<double> pendingProximityModeApplyBeat;
     EngineDiagnostics diagnostics;
 };
 
@@ -103,6 +126,7 @@ public:
     void play();
     void stop();
     void setMotionPaused (bool paused);
+    void setProximityAuditionMode (ProximityAuditionMode mode);
     bool setBpm (double bpm);
     void reschedule();
     void recordBridgeReconnect();
@@ -124,12 +148,17 @@ private:
 
     void processCollisionContacts (double currentBeat);
     void processSpeedActivity (double currentBeat, std::size_t fixedStepCount);
+    void processProximity (double currentBeat);
     bool queueIntent (const MusicalIntent& intent);
     void applyDueIntents (double currentBeat);
     void schedulePhraseRange (const music::Phrase& phrase,
                               double startBeat,
                               double endBeat,
                               music::MidiSink& targetSink) const;
+    const std::vector<music::NoteEvent>& baseEventsAt (
+        const music::Phrase& phrase, double beat) const;
+    std::vector<music::NoteEvent> proximityEventsAt (
+        const music::Phrase& phrase, double beat) const;
     music::Phrase* findPhrase (const std::string& phraseId) noexcept;
 
     music::MidiSink& sink;
@@ -143,5 +172,18 @@ private:
     std::map<std::string, SpeedActivityTracker> speedTrackers;
     std::map<std::string, std::optional<ActivityBand>> pendingSpeedBands;
     std::size_t observedPhysicsStepCount = 0;
+    struct ProximityPairRuntime
+    {
+        std::string firstPhraseId;
+        std::string secondPhraseId;
+        ProximityTracker tracker;
+        CouplingLevel activeLevel = CouplingLevel::loose;
+        std::optional<CouplingLevel> pendingLevel;
+        std::optional<double> pendingApplyBeat;
+    };
+    std::vector<ProximityPairRuntime> proximityPairs;
+    ProximityAuditionMode proximityMode = ProximityAuditionMode::rhythmProfiles;
+    std::optional<ProximityAuditionMode> pendingProximityMode;
+    std::optional<double> pendingProximityModeApplyBeat;
 };
 } // namespace drift::engine

@@ -99,7 +99,8 @@ body {
 .transport-button:disabled,
 .motion-button:disabled,
 .tempo-control input:disabled,
-.midi-output-control select:disabled {
+.midi-output-control select:disabled,
+.proximity-mode-control select:disabled {
   cursor: not-allowed;
   opacity: 0.42;
 }
@@ -107,7 +108,8 @@ body {
 .transport-button:focus-visible,
 .motion-button:focus-visible,
 .tempo-control input:focus-visible,
-.midi-output-control select:focus-visible {
+.midi-output-control select:focus-visible,
+.proximity-mode-control select:focus-visible {
   outline: 2px solid var(--sun);
   outline-offset: 3px;
 }
@@ -136,7 +138,8 @@ body {
   text-align: center;
 }
 
-.midi-output-control {
+.midi-output-control,
+.proximity-mode-control {
   display: grid;
   gap: 4px;
   color: var(--muted);
@@ -149,6 +152,19 @@ body {
   width: 180px;
   padding: 8px 28px 8px 8px;
   border: 1px solid rgba(238, 241, 232, 0.22);
+  border-radius: 4px;
+  color: var(--ink);
+  background: rgba(12, 18, 38, 0.8);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.proximity-mode-control select {
+  width: 150px;
+  padding: 8px 28px 8px 8px;
+  border: 1px solid rgba(110, 208, 196, 0.3);
   border-radius: 4px;
   color: var(--ink);
   background: rgba(12, 18, 38, 0.8);

@@ -41,6 +41,7 @@ SpatialWorld::SpatialWorld (std::vector<PhraseBody> bodiesIn, double initialTime
 
 void SpatialWorld::advanceTo (double nowSeconds)
 {
+    latestStepBodySnapshots.clear();
     const auto elapsedSeconds = std::max (0.0, nowSeconds - lastUpdateSeconds);
     lastUpdateSeconds = std::max (lastUpdateSeconds, nowSeconds);
     accumulatorSeconds += elapsedSeconds;
@@ -50,6 +51,7 @@ void SpatialWorld::advanceTo (double nowSeconds)
            && stepCount < maximumCatchUpSteps)
     {
         integrateStep();
+        latestStepBodySnapshots.push_back (phraseBodies);
         accumulatorSeconds -= fixedStepSeconds;
         ++stepCount;
     }
@@ -187,6 +189,11 @@ CollisionPairState SpatialWorld::collisionPairState (
 const std::vector<PhraseBody>& SpatialWorld::bodies() const noexcept
 {
     return phraseBodies;
+}
+
+const std::vector<std::vector<PhraseBody>>& SpatialWorld::stepBodySnapshots() const noexcept
+{
+    return latestStepBodySnapshots;
 }
 
 const SpatialWorldDiagnostics& SpatialWorld::diagnostics() const noexcept

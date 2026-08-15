@@ -41,6 +41,8 @@ std::optional<BridgeCommandType> commandTypeForName (const juce::String& type)
     if (type == "transport.play") return BridgeCommandType::transportPlay;
     if (type == "transport.stop") return BridgeCommandType::transportStop;
     if (type == "world.setMotionPaused") return BridgeCommandType::worldSetMotionPaused;
+    if (type == "proximity.setAuditionMode")
+        return BridgeCommandType::proximitySetAuditionMode;
     if (type == "transport.setTempo") return BridgeCommandType::transportSetTempo;
     if (type == "midi.selectOutput") return BridgeCommandType::midiSelectOutput;
     if (type == "phrase.dragStart") return BridgeCommandType::phraseDragStart;
@@ -106,6 +108,18 @@ CommandDispatchResult validateCommandEnvelope (const juce::var& envelope)
                            "The motion payload requires a boolean paused value");
 
         command.motionPaused = static_cast<bool> (paused);
+    }
+    else if (*commandType == BridgeCommandType::proximitySetAuditionMode)
+    {
+        const auto mode = payloadObject->getProperty ("mode");
+        if (! mode.isString()
+            || (mode.toString() != "rhythmProfiles"
+                && mode.toString() != "sharedAccents"))
+        {
+            return reject (command.messageId, CommandRejectionCode::invalidPayload,
+                           "The proximity mode must be rhythmProfiles or sharedAccents");
+        }
+        command.proximityMode = mode.toString().toStdString();
     }
     else if (*commandType == BridgeCommandType::transportSetTempo)
     {
@@ -252,6 +266,10 @@ CommandDispatchResult dispatchCommandEnvelope (const juce::var& envelope,
         case BridgeCommandType::worldSetMotionPaused:
             if (handlers.onWorldSetMotionPaused)
                 handlers.onWorldSetMotionPaused (command.motionPaused);
+            break;
+        case BridgeCommandType::proximitySetAuditionMode:
+            if (handlers.onProximitySetAuditionMode)
+                handlers.onProximitySetAuditionMode (command.proximityMode);
             break;
         case BridgeCommandType::transportSetTempo:
             if (handlers.onTransportSetTempo) handlers.onTransportSetTempo (command.bpm);
