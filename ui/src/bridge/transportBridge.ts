@@ -20,6 +20,10 @@ export interface EngineDiagnostics {
   collisionContactBeginCount: number
   collisionIntentQueuedCount: number
   collisionTransitionAppliedCount: number
+  speedBandChangeCount: number
+  speedIntentQueuedCount: number
+  speedIntentSuppressedCount: number
+  speedTransitionAppliedCount: number
   commandQueueDepth: number
   maximumCommandQueueDepth: number
   coalescedMoveCount: number
@@ -28,6 +32,7 @@ export interface EngineDiagnostics {
 }
 
 export type PhraseRole = 'rhythm' | 'bass' | 'harmony' | 'lead'
+export type ActivityBand = 'sparse' | 'normal' | 'active'
 
 export interface PhraseSnapshot {
   id: string
@@ -36,6 +41,10 @@ export interface PhraseSnapshot {
   currentVariantId: string
   pendingVariantId: string | null
   pendingVariantApplyBeat: number | null
+  rawNormalizedSpeed: number
+  smoothedNormalizedSpeed: number
+  activityBand: ActivityBand
+  pendingActivityBand: ActivityBand | null
   midiChannel: number
   position: { x: number; y: number }
   velocity: { x: number; y: number }
@@ -52,6 +61,10 @@ export interface WorldDiagnostics {
   collisionContactBeginCount: number
   collisionIntentQueuedCount: number
   collisionTransitionAppliedCount: number
+  speedBandChangeCount: number
+  speedIntentQueuedCount: number
+  speedIntentSuppressedCount: number
+  speedTransitionAppliedCount: number
   droppedSnapshotCount: number
   maximumSnapshotIntervalMs: number
   commandQueueDepth: number
@@ -120,6 +133,10 @@ export const initialTransportState: TransportState = {
     collisionContactBeginCount: 0,
     collisionIntentQueuedCount: 0,
     collisionTransitionAppliedCount: 0,
+    speedBandChangeCount: 0,
+    speedIntentQueuedCount: 0,
+    speedIntentSuppressedCount: 0,
+    speedTransitionAppliedCount: 0,
     commandQueueDepth: 0,
     maximumCommandQueueDepth: 0,
     coalescedMoveCount: 0,
@@ -142,6 +159,10 @@ export const initialWorldSnapshot: WorldSnapshot = {
     collisionContactBeginCount: 0,
     collisionIntentQueuedCount: 0,
     collisionTransitionAppliedCount: 0,
+    speedBandChangeCount: 0,
+    speedIntentQueuedCount: 0,
+    speedIntentSuppressedCount: 0,
+    speedTransitionAppliedCount: 0,
     droppedSnapshotCount: 0,
     maximumSnapshotIntervalMs: 0,
     commandQueueDepth: 0,
@@ -300,6 +321,10 @@ function isTransportState(payload: unknown): payload is TransportState {
     typeof diagnostics.collisionContactBeginCount === 'number' &&
     typeof diagnostics.collisionIntentQueuedCount === 'number' &&
     typeof diagnostics.collisionTransitionAppliedCount === 'number' &&
+    typeof diagnostics.speedBandChangeCount === 'number' &&
+    typeof diagnostics.speedIntentQueuedCount === 'number' &&
+    typeof diagnostics.speedIntentSuppressedCount === 'number' &&
+    typeof diagnostics.speedTransitionAppliedCount === 'number' &&
     typeof diagnostics.commandQueueDepth === 'number' &&
     typeof diagnostics.maximumCommandQueueDepth === 'number' &&
     typeof diagnostics.coalescedMoveCount === 'number' &&
@@ -344,6 +369,14 @@ function isWorldSnapshot(payload: unknown): payload is WorldSnapshot {
     (diagnostics.collisionIntentQueuedCount ?? -1) < 0 ||
     !Number.isSafeInteger(diagnostics.collisionTransitionAppliedCount) ||
     (diagnostics.collisionTransitionAppliedCount ?? -1) < 0 ||
+    !Number.isSafeInteger(diagnostics.speedBandChangeCount) ||
+    (diagnostics.speedBandChangeCount ?? -1) < 0 ||
+    !Number.isSafeInteger(diagnostics.speedIntentQueuedCount) ||
+    (diagnostics.speedIntentQueuedCount ?? -1) < 0 ||
+    !Number.isSafeInteger(diagnostics.speedIntentSuppressedCount) ||
+    (diagnostics.speedIntentSuppressedCount ?? -1) < 0 ||
+    !Number.isSafeInteger(diagnostics.speedTransitionAppliedCount) ||
+    (diagnostics.speedTransitionAppliedCount ?? -1) < 0 ||
     !Number.isSafeInteger(diagnostics.droppedSnapshotCount) ||
     (diagnostics.droppedSnapshotCount ?? -1) < 0 ||
     !isFiniteNumber(diagnostics.maximumSnapshotIntervalMs) ||
@@ -381,6 +414,15 @@ function isWorldSnapshot(payload: unknown): payload is WorldSnapshot {
           candidate.pendingVariantApplyBeat >= 0)) &&
       ((candidate.pendingVariantId === null) ===
         (candidate.pendingVariantApplyBeat === null)) &&
+      isFiniteNumber(candidate.rawNormalizedSpeed) &&
+      candidate.rawNormalizedSpeed >= 0 &&
+      candidate.rawNormalizedSpeed <= 1 &&
+      isFiniteNumber(candidate.smoothedNormalizedSpeed) &&
+      candidate.smoothedNormalizedSpeed >= 0 &&
+      candidate.smoothedNormalizedSpeed <= 1 &&
+      ['sparse', 'normal', 'active'].includes(candidate.activityBand ?? '') &&
+      (candidate.pendingActivityBand === null ||
+        ['sparse', 'normal', 'active'].includes(candidate.pendingActivityBand ?? '')) &&
       Number.isSafeInteger(candidate.midiChannel) &&
       (candidate.midiChannel ?? 0) >= 1 &&
       (candidate.midiChannel ?? 0) <= 16 &&

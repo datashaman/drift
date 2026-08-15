@@ -3,6 +3,7 @@
 #include "Engine/EngineCommandQueue.h"
 #include "Engine/SpatialWorld.h"
 #include "Engine/TransportEngine.h"
+#include "Engine/SpeedActivityMapping.h"
 #include "Music/MidiSink.h"
 #include "Music/MidiOutput.h"
 #include "Music/PhraseScheduler.h"
@@ -406,6 +407,55 @@ void testInitialCompositionIsAuthoritative()
     }
 
     expect (uniqueIds.size() == phrases.size(), "Phrase IDs are unique");
+}
+
+void testSpeedActivityMappingAndSmoothing()
+{
+    using drift::engine::ActivityBand;
+    using drift::engine::SpeedActivityTracker;
+    using drift::engine::activityBandAfterObservation;
+
+    expect (std::string { drift::engine::variantIdForActivityBand (ActivityBand::sparse) }
+                == "C"
+            && std::string { drift::engine::variantIdForActivityBand (ActivityBand::normal) }
+                   == "A"
+            && std::string { drift::engine::variantIdForActivityBand (ActivityBand::active) }
+                   == "B",
+            "Sparse, normal, and active bands map to authored C, A, and B variants");
+    expect (activityBandAfterObservation (ActivityBand::normal, 0.015)
+                == ActivityBand::sparse
+            && activityBandAfterObservation (ActivityBand::sparse, 0.039)
+                   == ActivityBand::sparse
+            && activityBandAfterObservation (ActivityBand::sparse, 0.040)
+                   == ActivityBand::normal,
+            "Sparse hysteresis includes both exact thresholds and holds between them");
+    expect (activityBandAfterObservation (ActivityBand::normal, 0.450)
+                == ActivityBand::active
+            && activityBandAfterObservation (ActivityBand::active, 0.301)
+                   == ActivityBand::active
+            && activityBandAfterObservation (ActivityBand::active, 0.300)
+                   == ActivityBand::normal,
+            "Active hysteresis includes both exact thresholds and holds between them");
+
+    SpeedActivityTracker smoothing;
+    smoothing.observe (0.03, 0, false);
+    smoothing.observe (1.0, 1, false);
+    const auto alpha = 1.0 - std::exp (
+        -drift::engine::SpatialWorld::fixedStepSeconds
+        / SpeedActivityTracker::smoothingTimeConstantSeconds);
+    expectNear (smoothing.smoothedNormalizedSpeed(), 0.03 + alpha * 0.97,
+                "Speed smoothing advances by the deterministic 120 Hz exponential step");
+    const auto beforeSuspension = smoothing.smoothedNormalizedSpeed();
+    smoothing.observe (0.0, 1000, true);
+    expectNear (smoothing.smoothedNormalizedSpeed(), beforeSuspension,
+                "Suspended speed observation does not advance smoothing or bands");
+
+    SpeedActivityTracker jitter;
+    jitter.observe (0.03, 0, false);
+    for (auto step = 0; step < 1000; ++step)
+        jitter.observe (step % 2 == 0 ? 0.02 : 0.039, 1, false);
+    expect (jitter.stableBand() == ActivityBand::normal,
+            "Speed jitter inside the hysteresis window does not chatter bands");
 }
 
 void testCollisionVariantRulesAndCycle()
@@ -1076,6 +1126,152 @@ void testSimultaneousCollisionsUseStablePriority()
             "Simultaneous variant changes preserve paired MIDI output");
 }
 
+void testSpeedActivityQueuesQuantizedVariantsAndCollisionWins()
+{
+    const auto phraseById = [] (const drift::engine::EngineSnapshot& snapshot,
+                                const std::string& phraseId)
+        -> const drift::engine::PhraseSnapshot& {
+        const auto phrase = std::find_if (
+            snapshot.phrases.begin(), snapshot.phrases.end(), [&] (const auto& candidate) {
+                return candidate.id == phraseId;
+            });
+        if (phrase == snapshot.phrases.end())
+            throw std::runtime_error ("Missing phrase snapshot");
+        return *phrase;
+    };
+
+    FakeClock clock;
+    drift::music::RecordingMidiSink sink;
+    drift::engine::TransportEngine engine { clock, sink };
+    engine.play();
+    expect (engine.beginPhraseDrag ("bass")
+                && engine.throwPhrase ("bass", { 0.0, -1.5 }),
+            "A maximum native throw can drive the bass activity tracker");
+
+    for (auto step = 0; step < 60; ++step)
+    {
+        clock.advance (drift::engine::SpatialWorld::fixedStepSeconds);
+        engine.tick();
+    }
+
+    auto snapshot = engine.snapshot();
+    auto bass = phraseById (snapshot, "bass");
+    expect (bass.activityBand == drift::engine::ActivityBand::active
+                && bass.pendingActivityBand == drift::engine::ActivityBand::active,
+            "A fast phrase settles into active and publishes its pending speed band");
+    expect (bass.currentVariantId == "A" && bass.pendingVariantId == "B"
+                && bass.pendingVariantApplyBeat == 4.0,
+            "Active speed queues authored variant B at the next unscheduled bar");
+    expect (snapshot.diagnostics.speedBandChangeCount == 1
+                && snapshot.diagnostics.speedIntentQueuedCount == 1,
+            "A stable speed crossing emits exactly one observable intent");
+
+    expect (engine.beginPhraseDrag ("drums"),
+            "The priority fixture can move drums into the fast bass");
+    expect (engine.moveDraggedPhrase ("drums", bass.position),
+            "The priority fixture creates a bass-drums contact");
+    clock.advance (drift::engine::SpatialWorld::fixedStepSeconds);
+    engine.tick();
+    snapshot = engine.snapshot();
+    bass = phraseById (snapshot, "bass");
+    expect (bass.pendingVariantId == "B" && ! bass.pendingActivityBand,
+            "A collision replaces a speed intent aimed at the same musical boundary");
+    expect (snapshot.diagnostics.collisionIntentQueuedCount == 1,
+            "The replacing collision is counted as the accepted boundary intent");
+
+    while (engine.snapshot().beatPosition + 1.0e-9 < 4.0)
+    {
+        clock.advance (0.002);
+        engine.tick();
+    }
+    snapshot = engine.snapshot();
+    expect (phraseById (snapshot, "bass").currentVariantId == "B"
+                && snapshot.diagnostics.collisionTransitionAppliedCount == 1
+                && snapshot.diagnostics.speedTransitionAppliedCount == 0,
+            "The boundary applies the collision transition once, not the displaced speed intent");
+    expect (sink.activeNoteCount() == 0 && snapshot.diagnostics.lateMidiEventCount == 0,
+            "Speed/collision arbitration preserves paired, on-time MIDI");
+
+    FakeClock sameTickClock;
+    drift::music::RecordingMidiSink sameTickSink;
+    drift::engine::TransportEngine sameTickEngine { sameTickClock, sameTickSink };
+    sameTickEngine.play();
+    sameTickEngine.beginPhraseDrag ("bass");
+    sameTickEngine.throwPhrase ("bass", { 0.0, -1.5 });
+    for (auto step = 0; step < 16; ++step)
+    {
+        sameTickClock.advance (drift::engine::SpatialWorld::fixedStepSeconds);
+        sameTickEngine.tick();
+    }
+    expect (phraseById (sameTickEngine.snapshot(), "bass").activityBand
+                == drift::engine::ActivityBand::normal,
+            "The simultaneous fixture stops immediately below the active threshold");
+    sameTickEngine.beginPhraseDrag ("drums");
+    sameTickEngine.moveDraggedPhrase (
+        "drums", phraseById (sameTickEngine.snapshot(), "bass").position);
+    sameTickClock.advance (drift::engine::SpatialWorld::fixedStepSeconds);
+    sameTickEngine.tick();
+    const auto sameTick = sameTickEngine.snapshot();
+    const auto& sameTickBass = phraseById (sameTick, "bass");
+    expect (sameTickBass.activityBand == drift::engine::ActivityBand::active
+                && sameTickBass.pendingVariantId == "B"
+                && ! sameTickBass.pendingActivityBand,
+            "A same-tick collision wins while the observed speed band still advances");
+    expect (sameTick.diagnostics.speedIntentSuppressedCount == 1
+                && sameTick.diagnostics.collisionIntentQueuedCount == 1,
+            "Same-tick collision priority records the suppressed speed intent exactly once");
+
+    FakeClock pausedClock;
+    drift::music::RecordingMidiSink pausedSink;
+    drift::engine::TransportEngine pausedEngine { pausedClock, pausedSink };
+    pausedEngine.play();
+    pausedEngine.beginPhraseDrag ("melody");
+    pausedEngine.throwPhrase ("melody", { 1.5, 0.0 });
+    pausedEngine.setMotionPaused (true);
+    for (auto step = 0; step < 120; ++step)
+    {
+        pausedClock.advance (drift::engine::SpatialWorld::fixedStepSeconds);
+        pausedEngine.tick();
+    }
+    expect (phraseById (pausedEngine.snapshot(), "melody").activityBand
+                == drift::engine::ActivityBand::normal,
+            "Freeze Motion suspends speed-band observation without changing musical activity");
+    pausedEngine.setMotionPaused (false);
+    for (auto step = 0; step < 60; ++step)
+    {
+        pausedClock.advance (drift::engine::SpatialWorld::fixedStepSeconds);
+        pausedEngine.tick();
+    }
+    expect (phraseById (pausedEngine.snapshot(), "melody").activityBand
+                == drift::engine::ActivityBand::active,
+            "Speed observation resumes from stored native velocity after motion resumes");
+
+    FakeClock draggedClock;
+    drift::music::RecordingMidiSink draggedSink;
+    drift::engine::TransportEngine draggedEngine { draggedClock, draggedSink };
+    draggedEngine.play();
+    draggedEngine.beginPhraseDrag ("chords");
+    draggedEngine.throwPhrase ("chords", { -1.5, 0.0 });
+    draggedEngine.beginPhraseDrag ("chords");
+    for (auto step = 0; step < 120; ++step)
+    {
+        draggedClock.advance (drift::engine::SpatialWorld::fixedStepSeconds);
+        draggedEngine.tick();
+    }
+    expect (phraseById (draggedEngine.snapshot(), "chords").activityBand
+                == drift::engine::ActivityBand::normal,
+            "Direct dragging suspends speed observation even while native velocity is retained");
+    draggedEngine.endPhraseDrag ("chords");
+    for (auto step = 0; step < 60; ++step)
+    {
+        draggedClock.advance (drift::engine::SpatialWorld::fixedStepSeconds);
+        draggedEngine.tick();
+    }
+    expect (phraseById (draggedEngine.snapshot(), "chords").activityBand
+                == drift::engine::ActivityBand::active,
+            "Ending a drag resumes observation from the retained native velocity");
+}
+
 void testFourPhrasesShareOneTransport()
 {
     FakeClock clock;
@@ -1645,6 +1841,7 @@ int main()
     testQuantizationBoundaries();
     testPhraseSchedulingAcrossLoopAndBar();
     testInitialCompositionIsAuthoritative();
+    testSpeedActivityMappingAndSmoothing();
     testCollisionVariantRulesAndCycle();
     testSpatialWorldFixedStepAndBoundaries();
     testSpatialWorldBoundsCatchUpWork();
@@ -1656,6 +1853,7 @@ int main()
     testCollisionQueuesAndAppliesBassVariantAtBar();
     testEveryCollisionPairQueuesItsMappedTarget();
     testSimultaneousCollisionsUseStablePriority();
+    testSpeedActivityQueuesQuantizedVariantsAndCollisionWins();
     testFourPhrasesShareOneTransport();
     testMotionPauseDoesNotInterruptPlayback();
     testEngineIsIndependentOfUiUpdateTiming();

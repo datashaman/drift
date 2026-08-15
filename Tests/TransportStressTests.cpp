@@ -303,6 +303,10 @@ int main()
     require (stressed.snapshot.diagnostics.collisionIntentQueuedCount >= 1
                  && stressed.snapshot.diagnostics.collisionTransitionAppliedCount >= 1,
              "the stress run did not exercise the collision transition path");
+    require (stressed.snapshot.diagnostics.speedBandChangeCount >= 1
+                 && stressed.snapshot.diagnostics.speedIntentQueuedCount >= 1
+                 && stressed.snapshot.diagnostics.speedTransitionAppliedCount >= 1,
+             "the stress run did not exercise quantized speed activity transitions");
 
     std::cout << std::fixed << std::setprecision (9)
               << "Drift deterministic timing stress report\n"
@@ -327,6 +331,14 @@ int main()
               << stressed.snapshot.diagnostics.collisionIntentQueuedCount << '\n'
               << "Collision transitions applied: "
               << stressed.snapshot.diagnostics.collisionTransitionAppliedCount << '\n'
+              << "Speed band changes: "
+              << stressed.snapshot.diagnostics.speedBandChangeCount << '\n'
+              << "Speed intents queued: "
+              << stressed.snapshot.diagnostics.speedIntentQueuedCount << '\n'
+              << "Speed intents suppressed: "
+              << stressed.snapshot.diagnostics.speedIntentSuppressedCount << '\n'
+              << "Speed transitions applied: "
+              << stressed.snapshot.diagnostics.speedTransitionAppliedCount << '\n'
               << "Recorded MIDI messages: " << stressed.messages.size() << '\n'
               << "Scheduling watermark: "
               << stressed.snapshot.diagnostics.schedulingWatermarkBeat << " beats\n"

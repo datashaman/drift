@@ -268,7 +268,10 @@ Positions and velocities use normalized world coordinates so UI size and display
         "radius": 0.06,
         "variant": "B",
         "pendingVariant": null,
-        "activity": 0.48,
+        "rawNormalizedSpeed": 0.52,
+        "smoothedNormalizedSpeed": 0.48,
+        "activityBand": "active",
+        "pendingActivityBand": null,
         "dragged": false,
         "playing": true
       }
@@ -358,7 +361,16 @@ spatial observation
 
 Only the intent processor may change a phrase's musical variant because of spatial behavior. This creates a testable seam between physics and music.
 
-Continuous inputs such as speed and proximity should be smoothed and quantized into stable states to prevent rapid variant flapping. Hysteresis is preferred over reacting to every small numeric change.
+Speed is normalized as velocity magnitude divided by `SpatialWorld::maximumThrowSpeed`, clamped to `[0, 1]`, then filtered once per 120 Hz physics step with a deterministic 250 ms exponential time constant. The tracker starts in normal and uses these inclusive hysteresis transitions:
+
+| Current band | Next band | Smoothed threshold | Variant |
+| --- | --- | --- | --- |
+| Normal | Sparse | `≤ 0.015` | `C` |
+| Sparse | Normal | `≥ 0.040` | `A` |
+| Normal | Active | `≥ 0.450` | `B` |
+| Active | Normal | `≤ 0.300` | `A` |
+
+Observation is suspended while world motion is paused or the phrase is dragged: raw speed remains observable, but smoothing and the stable band do not advance. Observation resumes from the released native velocity. Only stable band changes emit intents, and accepted changes are quantized to the next eligible bar.
 
 ### 9.3 MIDI scheduling pipeline
 
@@ -403,9 +415,9 @@ Initial mappings:
 | `chords`, `melody` | `chords` |
 | `drums`, `melody` | `melody` |
 
-Contact begins are sorted lexicographically by their stable ordered phrase IDs before evaluation. A phrase accepts at most one pending variant transition; subsequent same-tick or pre-boundary contacts targeting that phrase are observed but do not replace the accepted intent. This makes simultaneous outcomes independent of physics-body iteration order and prevents contradictory pending state.
+Contact begins are sorted lexicographically by their stable ordered phrase IDs before evaluation. A phrase accepts at most one collision intent; subsequent same-tick contacts targeting that phrase are observed but do not replace the accepted collision. This makes simultaneous outcomes independent of physics-body iteration order and prevents contradictory pending state.
 
-If two mappings request incompatible changes for the same phrase and boundary, a deterministic policy resolves them. For the POC, explicit collision changes should take priority over continuous speed/proximity changes.
+If collision and speed request incompatible changes for the same phrase and boundary, the explicit collision wins. A collision replaces an already-pending speed intent for that boundary; a speed crossing observed after a collision is suppressed. The stable speed band still advances and a suppressed crossing is not retried until another threshold crossing, preventing a delayed speed intent from undoing the collision one bar later.
 
 ## 11. React and PixiJS design
 
