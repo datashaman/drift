@@ -233,13 +233,15 @@ export function App({ bridge }: AppProps) {
             <dt>Physics</dt>
             <dd>{worldSnapshot.diagnostics.physicsStepCount} steps</dd>
           </div>
-          <div>
-            <dt>Collision</dt>
-            <dd>
-              {worldSnapshot.collision.touching ? 'contact' : 'clear'} /{' '}
-              {worldSnapshot.collision.cooldownRemainingMs.toFixed(0)} ms
-            </dd>
-          </div>
+          {worldSnapshot.collisions.map((collision) => (
+            <div key={`${collision.firstPhraseId}:${collision.secondPhraseId}`}>
+              <dt>{collision.firstPhraseId} + {collision.secondPhraseId}</dt>
+              <dd>
+                → {collision.targetPhraseId} / {collision.touching ? 'contact' : 'clear'} /{' '}
+                {collision.cooldownRemainingMs.toFixed(0)} ms
+              </dd>
+            </div>
+          ))}
           <div>
             <dt>Transitions</dt>
             <dd>

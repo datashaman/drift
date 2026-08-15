@@ -61,6 +61,14 @@ export interface WorldDiagnostics {
   commandPressureEventCount: number
 }
 
+export interface CollisionSnapshot {
+  firstPhraseId: string
+  secondPhraseId: string
+  targetPhraseId: string
+  touching: boolean
+  cooldownRemainingMs: number
+}
+
 export interface WorldSnapshot {
   sequence: number
   engineTimeMs: number
@@ -71,12 +79,7 @@ export interface WorldSnapshot {
     beat: number
   }
   phrases: PhraseSnapshot[]
-  collision: {
-    firstPhraseId: string
-    secondPhraseId: string
-    touching: boolean
-    cooldownRemainingMs: number
-  }
+  collisions: CollisionSnapshot[]
   diagnostics: WorldDiagnostics
 }
 
@@ -129,12 +132,7 @@ export const initialWorldSnapshot: WorldSnapshot = {
   engineTimeMs: 0,
   transport: { playing: false, bpm: 120, bar: 1, beat: 1 },
   phrases: [],
-  collision: {
-    firstPhraseId: 'bass',
-    secondPhraseId: 'drums',
-    touching: false,
-    cooldownRemainingMs: 0,
-  },
+  collisions: [],
   diagnostics: {
     physicsStepCount: 0,
     physicsCatchUpStepCount: 0,
@@ -313,7 +311,6 @@ function isWorldSnapshot(payload: unknown): payload is WorldSnapshot {
   const snapshot = payload as Partial<WorldSnapshot>
   const transport = snapshot.transport as Partial<WorldSnapshot['transport']> | undefined
   const diagnostics = snapshot.diagnostics as Partial<WorldDiagnostics> | undefined
-  const collision = snapshot.collision as Partial<WorldSnapshot['collision']> | undefined
   const validRoles: PhraseRole[] = ['rhythm', 'bass', 'harmony', 'lead']
 
   if (
@@ -328,14 +325,7 @@ function isWorldSnapshot(payload: unknown): payload is WorldSnapshot {
     !Number.isSafeInteger(transport.bar) ||
     !isFiniteNumber(transport.beat) ||
     !Array.isArray(snapshot.phrases) ||
-    typeof collision !== 'object' ||
-    collision === null ||
-    !isMessageId(collision.firstPhraseId) ||
-    !isMessageId(collision.secondPhraseId) ||
-    collision.firstPhraseId === collision.secondPhraseId ||
-    typeof collision.touching !== 'boolean' ||
-    !isFiniteNumber(collision.cooldownRemainingMs) ||
-    collision.cooldownRemainingMs < 0 ||
+    !Array.isArray(snapshot.collisions) ||
     typeof diagnostics !== 'object' ||
     diagnostics === null ||
     !Number.isSafeInteger(diagnostics.physicsStepCount) ||
@@ -369,7 +359,7 @@ function isWorldSnapshot(payload: unknown): payload is WorldSnapshot {
   }
 
   const phraseIds = new Set<string>()
-  return snapshot.phrases.every((phrase) => {
+  const phrasesAreValid = snapshot.phrases.every((phrase) => {
     if (typeof phrase !== 'object' || phrase === null) return false
 
     const candidate = phrase as Partial<PhraseSnapshot>
@@ -416,6 +406,31 @@ function isWorldSnapshot(payload: unknown): payload is WorldSnapshot {
 
     if (!valid || phraseIds.has(candidate.id as string)) return false
     phraseIds.add(candidate.id as string)
+    return true
+  })
+
+  if (!phrasesAreValid) return false
+
+  const pairIds = new Set<string>()
+  return snapshot.collisions.every((collision) => {
+    if (typeof collision !== 'object' || collision === null) return false
+
+    const candidate = collision as Partial<CollisionSnapshot>
+    const pairId = `${candidate.firstPhraseId}:${candidate.secondPhraseId}`
+    const valid =
+      isMessageId(candidate.firstPhraseId) &&
+      isMessageId(candidate.secondPhraseId) &&
+      isMessageId(candidate.targetPhraseId) &&
+      candidate.firstPhraseId < candidate.secondPhraseId &&
+      phraseIds.has(candidate.firstPhraseId) &&
+      phraseIds.has(candidate.secondPhraseId) &&
+      phraseIds.has(candidate.targetPhraseId) &&
+      typeof candidate.touching === 'boolean' &&
+      isFiniteNumber(candidate.cooldownRemainingMs) &&
+      candidate.cooldownRemainingMs >= 0
+
+    if (!valid || pairIds.has(pairId)) return false
+    pairIds.add(pairId)
     return true
   })
 }

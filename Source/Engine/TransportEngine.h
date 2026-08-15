@@ -47,8 +47,9 @@ struct PhraseSnapshot
 
 struct CollisionSnapshot
 {
-    std::string firstPhraseId = "bass";
-    std::string secondPhraseId = "drums";
+    std::string firstPhraseId;
+    std::string secondPhraseId;
+    std::string targetPhraseId;
     bool touching = false;
     double cooldownRemainingSeconds = 0.0;
 };
@@ -64,7 +65,7 @@ struct EngineSnapshot
     std::size_t worldRevision = 0;
     std::size_t scheduledEventCount = 0;
     std::vector<PhraseSnapshot> phrases;
-    CollisionSnapshot collision;
+    std::vector<CollisionSnapshot> collisions;
     EngineDiagnostics diagnostics;
 };
 

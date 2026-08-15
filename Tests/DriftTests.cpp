@@ -1,4 +1,5 @@
 #include "Engine/Clock.h"
+#include "Engine/CollisionVariantMapping.h"
 #include "Engine/EngineCommandQueue.h"
 #include "Engine/SpatialWorld.h"
 #include "Engine/TransportEngine.h"
@@ -364,6 +365,26 @@ void testInitialCompositionIsAuthoritative()
                 "Every phrase begins without a pending variant transition");
         expect (drift::music::findVariant (phrase, "A") != nullptr,
                 "Every phrase exposes authored variant A");
+        expect (phrase.variants.size() == 3,
+                "Every phrase exposes exactly three authored variants");
+        expect (phrase.variants[0].id == "A" && phrase.variants[1].id == "B"
+                    && phrase.variants[2].id == "C",
+                "Every role uses stable A, B, C variant IDs in cycle order");
+        for (const auto& variant : phrase.variants)
+        {
+            expect (! variant.events.empty(), "Every authored variant contains notes");
+            expect (std::isfinite (variant.activity) && variant.activity >= 0.0
+                        && variant.activity <= 1.0,
+                    "Every authored variant has normalized activity metadata");
+            expect (std::all_of (
+                        variant.events.begin(), variant.events.end(), [] (const auto& event) {
+                            return event.beat >= 0.0 && event.beat < 4.0
+                                   && event.note >= 0 && event.note <= 127
+                                   && event.velocity > 0 && event.velocity <= 127
+                                   && event.durationBeats > 0.0;
+                        }),
+                    "Every authored event is valid inside the shared four-beat loop");
+        }
         expect (phrase.lengthBeats == 4.0, "All initial phrases share a four-beat loop");
         expect (! phrase.events.empty(), "Every initial phrase contains authored notes");
         expect (phrase.position.x >= 0.0 && phrase.position.x <= 1.0
@@ -378,9 +399,40 @@ void testInitialCompositionIsAuthoritative()
     }
 
     expect (uniqueIds.size() == phrases.size(), "Phrase IDs are unique");
-    const auto& bass = phrases[1];
-    expect (drift::music::findVariant (bass, "B") != nullptr,
-            "The collision tracer bullet includes authored bass variant B");
+}
+
+void testCollisionVariantRulesAndCycle()
+{
+    const std::array<std::array<const char*, 3>, 6> expected {{
+        { "bass", "chords", "chords" },
+        { "bass", "drums", "bass" },
+        { "bass", "melody", "bass" },
+        { "chords", "drums", "drums" },
+        { "chords", "melody", "chords" },
+        { "drums", "melody", "melody" },
+    }};
+
+    const auto& rules = drift::engine::collisionVariantRules();
+    expect (rules.size() == expected.size(), "Every unique phrase pair has one mapping");
+    for (std::size_t index = 0; index < expected.size(); ++index)
+    {
+        expect (std::string { rules[index].firstPhraseId } == expected[index][0]
+                    && std::string { rules[index].secondPhraseId } == expected[index][1]
+                    && std::string { rules[index].targetPhraseId } == expected[index][2],
+                "Collision mappings have stable lexicographic order and explicit targets");
+        const auto* reversed = drift::engine::findCollisionVariantRule (
+            expected[index][1], expected[index][0]);
+        expect (reversed != nullptr
+                    && std::string { reversed->targetPhraseId } == expected[index][2],
+                "Pair selection is independent of contact argument order");
+    }
+
+    auto phrase = drift::music::makeInitialComposition().front();
+    expect (drift::engine::nextVariantId (phrase) == "B", "Variant A advances to B");
+    drift::music::applyVariant (phrase, "B");
+    expect (drift::engine::nextVariantId (phrase) == "C", "Variant B advances to C");
+    drift::music::applyVariant (phrase, "C");
+    expect (drift::engine::nextVariantId (phrase) == "A", "Variant C wraps to A");
 }
 
 void testSpatialWorldFixedStepAndBoundaries()
@@ -872,6 +924,104 @@ void testCollisionQueuesAndAppliesBassVariantAtBar()
                 "A collision immediately after a bar targets the following bar");
 }
 
+void testEveryCollisionPairQueuesItsMappedTarget()
+{
+    const auto phraseById = [] (const drift::engine::EngineSnapshot& snapshot,
+                                const std::string& phraseId)
+        -> const drift::engine::PhraseSnapshot& {
+        const auto phrase = std::find_if (
+            snapshot.phrases.begin(), snapshot.phrases.end(), [&] (const auto& candidate) {
+                return candidate.id == phraseId;
+            });
+        if (phrase == snapshot.phrases.end())
+            throw std::runtime_error ("Missing phrase snapshot");
+        return *phrase;
+    };
+
+    for (const auto& rule : drift::engine::collisionVariantRules())
+    {
+        FakeClock clock;
+        drift::music::RecordingMidiSink sink;
+        drift::engine::TransportEngine engine { clock, sink };
+        engine.play();
+        expect (engine.beginPhraseDrag (rule.firstPhraseId),
+                "Every mapped pair can begin a deterministic collision fixture");
+        const auto secondPosition = phraseById (engine.snapshot(), rule.secondPhraseId).position;
+        expect (engine.moveDraggedPhrase (rule.firstPhraseId, secondPosition),
+                "Every mapped pair can be moved into contact");
+        clock.advance (drift::engine::SpatialWorld::fixedStepSeconds);
+        engine.tick();
+
+        const auto snapshot = engine.snapshot();
+        const auto& target = phraseById (snapshot, rule.targetPhraseId);
+        expect (target.currentVariantId == "A" && target.pendingVariantId == "B",
+                "Every unique pair queues variant B on its explicit target");
+        expect (target.pendingVariantApplyBeat == 4.0,
+                "Every pair applies at the same next eligible bar");
+        expect (snapshot.diagnostics.collisionContactBeginCount == 1
+                    && snapshot.diagnostics.collisionIntentQueuedCount == 1,
+                "Every pair produces exactly one observable intent");
+    }
+}
+
+void testSimultaneousCollisionsUseStablePriority()
+{
+    FakeClock clock;
+    drift::music::RecordingMidiSink sink;
+    drift::engine::TransportEngine engine { clock, sink };
+    engine.play();
+
+    const auto snapshotBefore = engine.snapshot();
+    const auto commonPosition = snapshotBefore.phrases.front().position;
+    for (const auto& phrase : snapshotBefore.phrases)
+    {
+        expect (engine.beginPhraseDrag (phrase.id),
+                "The simultaneous fixture can hold every phrase");
+        expect (engine.moveDraggedPhrase (phrase.id, commonPosition),
+                "The simultaneous fixture can co-locate every phrase");
+    }
+
+    clock.advance (drift::engine::SpatialWorld::fixedStepSeconds);
+    engine.tick();
+    auto snapshot = engine.snapshot();
+    expect (snapshot.collisions.size() == 6,
+            "The snapshot explains all six unique pair states");
+    expect (std::all_of (
+                snapshot.collisions.begin(), snapshot.collisions.end(), [] (const auto& pair) {
+                    return pair.touching
+                           && pair.firstPhraseId < pair.secondPhraseId
+                           && ! pair.targetPhraseId.empty();
+                }),
+            "Every simultaneous contact publishes its ordered pair and target");
+    expect (snapshot.diagnostics.collisionContactBeginCount == 6,
+            "A four-way overlap observes all six contacts");
+    expect (snapshot.diagnostics.collisionIntentQueuedCount == 4,
+            "Stable pair priority queues at most one change per target phrase");
+    expect (std::all_of (
+                snapshot.phrases.begin(), snapshot.phrases.end(), [] (const auto& phrase) {
+                    return phrase.currentVariantId == "A" && phrase.pendingVariantId == "B"
+                           && phrase.pendingVariantApplyBeat == 4.0;
+                }),
+            "Simultaneous contacts leave one non-contradictory pending B per phrase");
+
+    while (engine.snapshot().beatPosition + 1.0e-9 < 4.0)
+    {
+        clock.advance (0.001);
+        engine.tick();
+    }
+    snapshot = engine.snapshot();
+    expect (snapshot.diagnostics.collisionTransitionAppliedCount == 4,
+            "Every accepted simultaneous intent applies exactly once");
+    expect (std::all_of (
+                snapshot.phrases.begin(), snapshot.phrases.end(), [] (const auto& phrase) {
+                    return phrase.currentVariantId == "B" && ! phrase.pendingVariantId
+                           && ! phrase.pendingVariantApplyBeat;
+                }),
+            "All four transitions clear pending state at their shared boundary");
+    expect (sink.activeNoteCount() == 0,
+            "Simultaneous variant changes preserve paired MIDI output");
+}
+
 void testFourPhrasesShareOneTransport()
 {
     FakeClock clock;
@@ -1315,6 +1465,7 @@ int main()
     testQuantizationBoundaries();
     testPhraseSchedulingAcrossLoopAndBar();
     testInitialCompositionIsAuthoritative();
+    testCollisionVariantRulesAndCycle();
     testSpatialWorldFixedStepAndBoundaries();
     testSpatialWorldBoundsCatchUpWork();
     testSpatialWorldDragLifecycle();
@@ -1322,6 +1473,8 @@ int main()
     testSpatialWorldCollisionContactLifecycle();
     testEngineCommandQueueCoalescingAndPressure();
     testCollisionQueuesAndAppliesBassVariantAtBar();
+    testEveryCollisionPairQueuesItsMappedTarget();
+    testSimultaneousCollisionsUseStablePriority();
     testFourPhrasesShareOneTransport();
     testEngineIsIndependentOfUiUpdateTiming();
     testMidiOutputSelectionAndReplacement();
