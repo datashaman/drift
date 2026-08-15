@@ -62,6 +62,18 @@ TransportEngine::TransportEngine (Clock& clockIn, music::MidiSink& sinkIn)
       world (makePhraseBodies (phrases), clockIn.nowSeconds())
 {
     world.setMotionPaused (true);
+    const auto& bodies = world.bodies();
+    for (std::size_t index = 0; index < phrases.size(); ++index)
+    {
+        const auto& phrase = phrases[index];
+        speedTrackers.emplace (phrase.id, SpeedActivityTracker {});
+        pendingSpeedBands.emplace (phrase.id, std::nullopt);
+        const auto& velocity = bodies[index].velocity;
+        speedTrackers.at (phrase.id).observe (
+            std::hypot (velocity.x, velocity.y) / SpatialWorld::maximumThrowSpeed,
+            0,
+            true);
+    }
 }
 
 void TransportEngine::play()
@@ -88,6 +100,7 @@ void TransportEngine::stop()
     {
         phrase.pendingVariantId.reset();
         phrase.pendingVariantApplyBeat.reset();
+        pendingSpeedBands[phrase.id].reset();
     }
 }
 
@@ -130,8 +143,12 @@ void TransportEngine::recordBridgeReconnect()
 void TransportEngine::tick()
 {
     world.advanceTo (clock.nowSeconds());
+    const auto physicsStepCount = world.diagnostics().physicsStepCount;
+    const auto fixedSteps = physicsStepCount - observedPhysicsStepCount;
+    observedPhysicsStepCount = physicsStepCount;
     const auto state = transport.snapshot();
     processCollisionContacts (state.beatPosition);
+    processSpeedActivity (state.beatPosition, fixedSteps);
     applyDueIntents (state.beatPosition);
 
     if (! state.playing)
@@ -177,8 +194,8 @@ void TransportEngine::processCollisionContacts (double currentBeat)
             continue;
 
         ++diagnostics.collisionContactBeginCount;
-        const auto* target = findPhrase (rule->targetPhraseId);
-        if (target == nullptr || target->pendingVariantId)
+        auto* target = findPhrase (rule->targetPhraseId);
+        if (target == nullptr)
             continue;
 
         const auto variantId = nextVariantId (*target);
@@ -193,8 +210,60 @@ void TransportEngine::processCollisionContacts (double currentBeat)
             *variantId,
             music::quantizeForward (earliestUnscheduledBeat, barLengthBeats),
         };
-        if (queueIntent (intent))
+        auto& pendingSpeedBand = pendingSpeedBands[target->id];
+        if (target->pendingVariantId && target->pendingVariantApplyBeat
+            && pendingSpeedBand
+            && std::abs (*target->pendingVariantApplyBeat - intent.applyAtBeat)
+                   <= timingToleranceSeconds)
+        {
+            target->pendingVariantId = intent.variantId;
+            target->pendingVariantApplyBeat = intent.applyAtBeat;
+            pendingSpeedBand.reset();
             ++diagnostics.collisionIntentQueuedCount;
+        }
+        else if (queueIntent (intent))
+            ++diagnostics.collisionIntentQueuedCount;
+    }
+}
+
+void TransportEngine::processSpeedActivity (double currentBeat,
+                                            std::size_t fixedStepCount)
+{
+    const auto& bodies = world.bodies();
+    for (std::size_t index = 0; index < phrases.size(); ++index)
+    {
+        auto& phrase = phrases[index];
+        const auto& body = bodies[index];
+        const auto normalizedSpeed = std::hypot (body.velocity.x, body.velocity.y)
+                                     / SpatialWorld::maximumThrowSpeed;
+        auto& tracker = speedTrackers[phrase.id];
+        const auto change = tracker.observe (
+            normalizedSpeed, fixedStepCount, world.motionPaused() || body.dragged);
+        if (! change)
+            continue;
+
+        ++diagnostics.speedBandChangeCount;
+        const auto variantId = std::string { variantIdForActivityBand (*change) };
+        if (variantId == phrase.currentVariantId)
+            continue;
+
+        const auto earliestUnscheduledBeat = std::max (currentBeat, scheduledThroughBeat)
+                                             + timingToleranceSeconds;
+        const MusicalIntent intent {
+            phrase.id,
+            MusicalIntentType::changeVariant,
+            variantId,
+            music::quantizeForward (earliestUnscheduledBeat, barLengthBeats),
+        };
+        if (queueIntent (intent))
+        {
+            pendingSpeedBands[phrase.id] = *change;
+            ++diagnostics.speedIntentQueuedCount;
+        }
+        else
+        {
+            ++diagnostics.speedIntentSuppressedCount;
+        }
     }
 }
 
@@ -227,8 +296,15 @@ void TransportEngine::applyDueIntents (double currentBeat)
         }
 
         const auto variantId = *phrase.pendingVariantId;
+        const auto wasSpeedIntent = pendingSpeedBands[phrase.id].has_value();
         if (music::applyVariant (phrase, variantId))
-            ++diagnostics.collisionTransitionAppliedCount;
+        {
+            if (wasSpeedIntent)
+                ++diagnostics.speedTransitionAppliedCount;
+            else
+                ++diagnostics.collisionTransitionAppliedCount;
+        }
+        pendingSpeedBands[phrase.id].reset();
     }
 }
 
@@ -317,6 +393,7 @@ EngineSnapshot TransportEngine::snapshot() const
     {
         const auto& phrase = phrases[index];
         const auto& body = bodies[index];
+        const auto& tracker = speedTrackers.at (phrase.id);
         phraseSnapshots.push_back ({
             phrase.id,
             phrase.name,
@@ -324,6 +401,10 @@ EngineSnapshot TransportEngine::snapshot() const
             phrase.currentVariantId,
             phrase.pendingVariantId,
             phrase.pendingVariantApplyBeat,
+            tracker.rawNormalizedSpeed(),
+            tracker.smoothedNormalizedSpeed(),
+            tracker.stableBand(),
+            pendingSpeedBands.at (phrase.id),
             phrase.midiChannel,
             body.position,
             body.velocity,

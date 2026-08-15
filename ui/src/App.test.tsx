@@ -58,6 +58,10 @@ function worldEvent(
         collisionContactBeginCount: 2,
         collisionIntentQueuedCount: 1,
         collisionTransitionAppliedCount: 0,
+        speedBandChangeCount: 0,
+        speedIntentQueuedCount: 0,
+        speedIntentSuppressedCount: 0,
+        speedTransitionAppliedCount: 0,
         droppedSnapshotCount: 112,
         maximumSnapshotIntervalMs: 34.2,
         commandQueueDepth: 2,
@@ -82,6 +86,10 @@ function worldEvent(
           currentVariantId: 'A',
           pendingVariantId: null,
           pendingVariantApplyBeat: null,
+          rawNormalizedSpeed: 0.043,
+          smoothedNormalizedSpeed: 0.043,
+          activityBand: 'normal',
+          pendingActivityBand: null,
           midiChannel: 10,
           position: { x: 0.78, y: 0.58 },
           velocity: { x: -0.055, y: -0.035 },
@@ -97,6 +105,10 @@ function worldEvent(
           currentVariantId: 'A',
           pendingVariantId: null,
           pendingVariantApplyBeat: null,
+          rawNormalizedSpeed: 0.034,
+          smoothedNormalizedSpeed: 0.034,
+          activityBand: 'normal',
+          pendingActivityBand: null,
           midiChannel: 1,
           position: { x: 0.2, y: 0.28 },
           velocity: { x: 0.045, y: 0.025 },
@@ -112,6 +124,10 @@ function worldEvent(
           currentVariantId: 'A',
           pendingVariantId: null,
           pendingVariantApplyBeat: null,
+          rawNormalizedSpeed: 0.035,
+          smoothedNormalizedSpeed: 0.035,
+          activityBand: 'normal',
+          pendingActivityBand: null,
           midiChannel: 2,
           position: { x: 0.45, y: 0.76 },
           velocity: { x: 0.035, y: -0.04 },
@@ -127,6 +143,10 @@ function worldEvent(
           currentVariantId: 'A',
           pendingVariantId: null,
           pendingVariantApplyBeat: null,
+          rawNormalizedSpeed: 0.043,
+          smoothedNormalizedSpeed: 0.043,
+          activityBand: 'normal',
+          pendingActivityBand: null,
           midiChannel: 3,
           position: { x: 0.74, y: 0.2 },
           velocity: { x: -0.04, y: 0.05 },
@@ -214,6 +234,10 @@ describe('Drift bridge interface', () => {
             collisionContactBeginCount: 2,
             collisionIntentQueuedCount: 1,
             collisionTransitionAppliedCount: 0,
+            speedBandChangeCount: 0,
+            speedIntentQueuedCount: 0,
+            speedIntentSuppressedCount: 0,
+            speedTransitionAppliedCount: 0,
             commandQueueDepth: 2,
             maximumCommandQueueDepth: 7,
             coalescedMoveCount: 12,
@@ -341,7 +365,7 @@ describe('Drift bridge interface', () => {
     const appliedWorld = worldEvent(6)
     appliedWorld.payload.phrases[1].currentVariantId = 'B'
     act(() => bridge.publish(appliedWorld))
-    expect(screen.getByText(/BASS · B · playing/)).toBeTruthy()
+    expect(screen.getByText(/BASS · B · normal · speed .* · playing/)).toBeTruthy()
     expect(container.textContent).not.toContain('BASS · A → B')
 
     act(() => {
@@ -419,7 +443,7 @@ describe('Drift bridge interface', () => {
     const selectedWorld = worldEvent(5)
     selectedWorld.payload.phrases[1].dragged = true
     act(() => bridge.publish(selectedWorld))
-    expect(screen.getByText(/BASS · A · playing · moving · selected/)).toBeTruthy()
+    expect(screen.getByText(/BASS · A · normal · speed .* · playing · moving · selected/)).toBeTruthy()
   })
 
   it('ends an interrupted pointer lifecycle without throwing', () => {

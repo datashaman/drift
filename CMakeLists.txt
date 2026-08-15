@@ -62,6 +62,8 @@ add_library(DriftEngine STATIC
     Source/Engine/EngineCommandQueue.h
     Source/Engine/SpatialWorld.cpp
     Source/Engine/SpatialWorld.h
+    Source/Engine/SpeedActivityMapping.cpp
+    Source/Engine/SpeedActivityMapping.h
     Source/Engine/TransportEngine.cpp
     Source/Engine/TransportEngine.h
     Source/Music/MidiSink.cpp

@@ -276,6 +276,24 @@ export function App({ bridge }: AppProps) {
               {worldSnapshot.diagnostics.collisionTransitionAppliedCount} applied
             </dd>
           </div>
+          {worldSnapshot.phrases.map((phrase) => (
+            <div key={`speed:${phrase.id}`}>
+              <dt>{phrase.name} speed</dt>
+              <dd>
+                {phrase.activityBand}{phrase.pendingActivityBand ? ` → ${phrase.pendingActivityBand}` : ''} /{' '}
+                {phrase.rawNormalizedSpeed.toFixed(3)} raw / {phrase.smoothedNormalizedSpeed.toFixed(3)} smooth
+              </dd>
+            </div>
+          ))}
+          <div>
+            <dt>Speed activity</dt>
+            <dd>
+              {worldSnapshot.diagnostics.speedBandChangeCount} bands /{' '}
+              {worldSnapshot.diagnostics.speedIntentQueuedCount} queued /{' '}
+              {worldSnapshot.diagnostics.speedIntentSuppressedCount} suppressed /{' '}
+              {worldSnapshot.diagnostics.speedTransitionAppliedCount} applied
+            </dd>
+          </div>
           <div>
             <dt>Catch-up</dt>
             <dd>

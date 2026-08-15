@@ -231,6 +231,14 @@ void MainComponent::publishState()
         "collisionTransitionAppliedCount",
         static_cast<juce::int64> (
             state.transport.diagnostics.collisionTransitionAppliedCount));
+    diagnostics->setProperty ("speedBandChangeCount", static_cast<juce::int64> (
+        state.transport.diagnostics.speedBandChangeCount));
+    diagnostics->setProperty ("speedIntentQueuedCount", static_cast<juce::int64> (
+        state.transport.diagnostics.speedIntentQueuedCount));
+    diagnostics->setProperty ("speedIntentSuppressedCount", static_cast<juce::int64> (
+        state.transport.diagnostics.speedIntentSuppressedCount));
+    diagnostics->setProperty ("speedTransitionAppliedCount", static_cast<juce::int64> (
+        state.transport.diagnostics.speedTransitionAppliedCount));
     diagnostics->setProperty (
         "commandQueueDepth", static_cast<juce::int64> (state.commandQueue.queueDepth));
     diagnostics->setProperty (
@@ -304,6 +312,16 @@ void MainComponent::publishWorldSnapshot (const drift::engine::ControllerSnapsho
             phrase.pendingVariantApplyBeat
                 ? juce::var { *phrase.pendingVariantApplyBeat }
                 : juce::var {});
+        phraseObject->setProperty ("rawNormalizedSpeed", phrase.rawNormalizedSpeed);
+        phraseObject->setProperty (
+            "smoothedNormalizedSpeed", phrase.smoothedNormalizedSpeed);
+        phraseObject->setProperty (
+            "activityBand", drift::engine::activityBandName (phrase.activityBand));
+        phraseObject->setProperty (
+            "pendingActivityBand",
+            phrase.pendingActivityBand
+                ? juce::var { drift::engine::activityBandName (*phrase.pendingActivityBand) }
+                : juce::var {});
         phraseObject->setProperty ("midiChannel", phrase.midiChannel);
         phraseObject->setProperty ("playing", phrase.playing);
 
@@ -361,6 +379,14 @@ void MainComponent::publishWorldSnapshot (const drift::engine::ControllerSnapsho
         "collisionTransitionAppliedCount",
         static_cast<juce::int64> (
             state.transport.diagnostics.collisionTransitionAppliedCount));
+    diagnostics->setProperty ("speedBandChangeCount", static_cast<juce::int64> (
+        state.transport.diagnostics.speedBandChangeCount));
+    diagnostics->setProperty ("speedIntentQueuedCount", static_cast<juce::int64> (
+        state.transport.diagnostics.speedIntentQueuedCount));
+    diagnostics->setProperty ("speedIntentSuppressedCount", static_cast<juce::int64> (
+        state.transport.diagnostics.speedIntentSuppressedCount));
+    diagnostics->setProperty ("speedTransitionAppliedCount", static_cast<juce::int64> (
+        state.transport.diagnostics.speedTransitionAppliedCount));
     diagnostics->setProperty (
         "droppedSnapshotCount", static_cast<juce::int64> (droppedWorldSnapshotCount));
     diagnostics->setProperty (

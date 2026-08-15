@@ -2,6 +2,7 @@
 
 #include "Engine/Clock.h"
 #include "Engine/SpatialWorld.h"
+#include "Engine/SpeedActivityMapping.h"
 #include "Music/MidiSink.h"
 #include "Music/Phrase.h"
 #include "Music/PhraseScheduler.h"
@@ -9,6 +10,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -26,6 +28,10 @@ struct EngineDiagnostics
     std::size_t collisionContactBeginCount = 0;
     std::size_t collisionIntentQueuedCount = 0;
     std::size_t collisionTransitionAppliedCount = 0;
+    std::size_t speedBandChangeCount = 0;
+    std::size_t speedIntentQueuedCount = 0;
+    std::size_t speedIntentSuppressedCount = 0;
+    std::size_t speedTransitionAppliedCount = 0;
 };
 
 struct PhraseSnapshot
@@ -36,6 +42,10 @@ struct PhraseSnapshot
     std::string currentVariantId;
     std::optional<std::string> pendingVariantId;
     std::optional<double> pendingVariantApplyBeat;
+    double rawNormalizedSpeed = 0.0;
+    double smoothedNormalizedSpeed = 0.0;
+    ActivityBand activityBand = ActivityBand::normal;
+    std::optional<ActivityBand> pendingActivityBand;
     int midiChannel = 1;
     music::NormalizedPosition position;
     music::NormalizedVelocity velocity;
@@ -113,6 +123,7 @@ private:
     static constexpr double barLengthBeats = 4.0;
 
     void processCollisionContacts (double currentBeat);
+    void processSpeedActivity (double currentBeat, std::size_t fixedStepCount);
     bool queueIntent (const MusicalIntent& intent);
     void applyDueIntents (double currentBeat);
     void schedulePhraseRange (const music::Phrase& phrase,
@@ -129,5 +140,8 @@ private:
     music::PhraseScheduler scheduler;
     double scheduledThroughBeat = 0.0;
     EngineDiagnostics diagnostics;
+    std::map<std::string, SpeedActivityTracker> speedTrackers;
+    std::map<std::string, std::optional<ActivityBand>> pendingSpeedBands;
+    std::size_t observedPhysicsStepCount = 0;
 };
 } // namespace drift::engine
