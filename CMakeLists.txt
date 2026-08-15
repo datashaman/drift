@@ -121,6 +121,8 @@ target_link_libraries(Drift
         juce::juce_recommended_warning_flags
 )
 add_dependencies(Drift DriftUIBundle)
+# UI-only changes must relink Drift so the post-build bundle copy runs.
+set_property(TARGET Drift APPEND PROPERTY LINK_DEPENDS ${DRIFT_UI_OUTPUTS})
 
 add_custom_command(TARGET Drift POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E rm -rf "$<TARGET_FILE_DIR:Drift>/../Resources/ui"

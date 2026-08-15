@@ -212,7 +212,7 @@ Initial command set:
 | `phrase.move` | Set target position during a drag |
 | `phrase.dragEnd` | End direct manipulation without a throw |
 | `phrase.throw` | End manipulation with release velocity |
-| `proximity.setAuditionMode` | Queue the selected proximity experiment for the next bar |
+| `proximity.setAuditionMode` | Queue the selected proximity mode for the next bar |
 | `debug.setEnabled` | Enable or disable debug data publication |
 
 Example:
@@ -428,12 +428,12 @@ Initial mappings:
 - `SpeedActivityMapping`: smoothed speed selects sparse, normal, or active material at the next bar.
 - `ProximityRhythmMapping`: pairwise proximity selects a rhythmic-coupling state at a configured quantization boundary.
 
-`ProximityRhythmMapping` is being auditioned in two modes. Both run after collision and speed have resolved the active `A`/`B`/`C` phrase material:
+`ProximityRhythmMapping` provides two musician-selected modes. Both run after collision and speed have resolved the active `A`/`B`/`C` phrase material:
 
-- **Rhythm profiles:** a phrase takes the strongest coupling it has with any neighbour. Loose leaves authored onsets unchanged, linked snaps them to the nearest half beat, and tight snaps them to the nearest beat. Pitch, duration, and velocity are preserved; chord notes remain simultaneous, and exact duplicate pitch/onset results are coalesced.
-- **Shared accents:** timing and density remain unchanged. Exact onsets shared by a pair gain `+12` velocity when linked or `+24` when tight, clamped to MIDI velocity 127. When several neighbours qualify, the maximum boost wins rather than summing boosts.
+- **Lock Rhythm** (`rhythmProfiles`): a phrase takes the strongest coupling it has with any neighbour. Loose leaves authored onsets unchanged, linked snaps them to the nearest half beat, and tight snaps them to the nearest beat. Pitch, duration, and velocity are preserved; chord notes remain simultaneous, and exact duplicate pitch/onset results are coalesced.
+- **Accent Together** (`sharedAccents`): timing and density remain unchanged. Exact onsets shared by a pair gain `+12` velocity when linked or `+24` when tight, clamped to MIDI velocity 127. When several neighbours qualify, the maximum boost wins rather than summing boosts.
 
-Changing audition mode is itself bar-quantized and does not stop transport or invalidate already-scheduled MIDI. The selector and pair relationship lines are evaluation instrumentation; neither candidate is yet the chosen production mapping.
+Changing mode is itself bar-quantized and does not stop transport or invalidate already-scheduled MIDI. Live MIDI evaluation found both behaviors useful with different phrase material, so the selector remains an explicit musical control; Drift does not switch modes automatically or by pair.
 
 `CollisionVariantMapping` uses the six stable unordered pair rules below. The target advances through its authored variant order `A → B → C → A`.
 
@@ -610,7 +610,7 @@ The engine records bounded diagnostic counters rather than unbounded logs:
 - Active contacts and collision cooldowns.
 - Pending and applied intents.
 - Raw, smoothed, stable, and pending state for all six proximity pairs.
-- Current/pending proximity audition mode and proximity transition/mode counters.
+- Current/pending proximity mode and proximity transition/mode counters.
 - Current scheduling watermark.
 
 The React debug overlay reads these through snapshots or low-rate debug events.
