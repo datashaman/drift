@@ -188,6 +188,13 @@ juce::var makeTempoPayload (juce::var bpm)
     return juce::var { object };
 }
 
+juce::var makeMotionPayload (juce::var paused)
+{
+    auto* object = new juce::DynamicObject();
+    object->setProperty ("paused", std::move (paused));
+    return juce::var { object };
+}
+
 juce::var makeOutputPayload (const juce::String& outputId)
 {
     auto* object = new juce::DynamicObject();
@@ -607,6 +614,53 @@ void testSpatialWorldThrowLifecycle()
             "Non-finite native velocity is rejected");
     expect (edgeWorld.bodies().front().dragged,
             "A rejected throw does not interrupt the active drag");
+}
+
+void testSpatialWorldMotionPauseLifecycle()
+{
+    using drift::engine::PhraseBody;
+    using drift::engine::SpatialWorld;
+
+    SpatialWorld world {
+        {
+            PhraseBody { "repositioned", { 0.2, 0.3 }, { 0.3, 0.1 }, 0.05, 1.0 },
+            PhraseBody { "untouched", { 0.8, 0.7 }, { -0.2, -0.1 }, 0.05, 1.0 },
+        },
+        0.0,
+    };
+    world.setMotionPaused (true);
+    expect (world.motionPaused(), "The world publishes its authoritative paused state");
+    world.advanceTo (10.0 * SpatialWorld::fixedStepSeconds);
+    expectNear (world.bodies()[0].position.x, 0.2,
+                "Paused motion preserves a phrase's horizontal position");
+    expectNear (world.bodies()[1].position.y, 0.7,
+                "Paused motion preserves every autonomous position");
+    expectNear (world.bodies()[1].velocity.x, -0.2,
+                "An untouched phrase retains its velocity while paused");
+
+    expect (world.beginDrag ("repositioned"),
+            "A paused phrase remains directly manipulable");
+    expect (world.moveDraggedPhrase ("repositioned", { 0.75, 0.7 }),
+            "A paused phrase can be repositioned");
+    expect (world.throwPhrase ("repositioned", { 1.0, -0.5 }),
+            "Releasing a paused phrase completes its drag");
+    expectNear (world.bodies()[0].velocity.x, 0.0,
+                "A phrase manipulated while paused settles horizontally");
+    expectNear (world.bodies()[0].velocity.y, 0.0,
+                "A phrase manipulated while paused settles vertically");
+
+    world.advanceTo (11.0 * SpatialWorld::fixedStepSeconds);
+    expect (world.consumeCollisionBegins().size() == 1,
+            "Manual contacts remain active while autonomous motion is paused");
+
+    const auto untouchedBeforeResume = world.bodies()[1].position;
+    world.setMotionPaused (false);
+    world.advanceTo (12.0 * SpatialWorld::fixedStepSeconds);
+    expect (! world.motionPaused(), "Motion can resume independently");
+    expect (world.bodies()[1].position.x < untouchedBeforeResume.x,
+            "An untouched phrase resumes its preserved velocity");
+    expectNear (world.bodies()[0].position.x, 0.75,
+                "A repositioned phrase stays settled after resume");
 }
 
 void testSpatialWorldCollisionContactLifecycle()
@@ -1086,6 +1140,112 @@ void testFourPhrasesShareOneTransport()
             "Stopping the four-role composition leaves no active notes");
 }
 
+void testMotionPauseDoesNotInterruptPlayback()
+{
+    const auto phraseById = [] (const drift::engine::EngineSnapshot& snapshot,
+                                const std::string& phraseId)
+        -> const drift::engine::PhraseSnapshot& {
+        const auto phrase = std::find_if (
+            snapshot.phrases.begin(), snapshot.phrases.end(), [&] (const auto& candidate) {
+                return candidate.id == phraseId;
+            });
+        if (phrase == snapshot.phrases.end())
+            throw std::runtime_error ("Missing phrase snapshot");
+        return *phrase;
+    };
+
+    FakeClock clock;
+    drift::music::RecordingMidiSink sink;
+    drift::engine::TransportEngine engine { clock, sink };
+    expect (! engine.snapshot().playing && engine.snapshot().motionPaused,
+            "The stopped engine begins with world motion frozen");
+    engine.setMotionPaused (false);
+    expect (engine.snapshot().motionPaused,
+            "Motion cannot resume independently while transport is stopped");
+
+    engine.play();
+    expect (engine.snapshot().playing && ! engine.snapshot().motionPaused,
+            "Play starts transport and world motion together");
+    for (auto tick = 0; tick < 50; ++tick)
+    {
+        clock.advance (0.002);
+        engine.tick();
+    }
+
+    engine.setMotionPaused (true);
+    const auto frozen = engine.snapshot();
+    const auto messagesBeforePause = sink.messageCount();
+    const auto watermarkBeforePause = frozen.diagnostics.schedulingWatermarkBeat;
+    for (auto tick = 0; tick < 200; ++tick)
+    {
+        clock.advance (0.002);
+        engine.tick();
+    }
+
+    auto paused = engine.snapshot();
+    expect (paused.playing && paused.motionPaused,
+            "Independent motion pause leaves musical transport playing");
+    expect (paused.beatPosition > frozen.beatPosition
+                && paused.diagnostics.schedulingWatermarkBeat > watermarkBeforePause,
+            "Transport and scheduling advance while motion is frozen");
+    expect (sink.messageCount() > messagesBeforePause,
+            "MIDI scheduling continues without a pause or clear");
+    expect (paused.diagnostics.lateMidiEventCount == 0,
+            "Freezing motion introduces no late MIDI events");
+    for (const auto& phrase : frozen.phrases)
+    {
+        const auto& still = phraseById (paused, phrase.id);
+        expectNear (still.position.x, phrase.position.x,
+                    "Frozen phrases keep their horizontal positions");
+        expectNear (still.position.y, phrase.position.y,
+                    "Frozen phrases keep their vertical positions");
+        expectNear (still.velocity.x, phrase.velocity.x,
+                    "Untouched phrases preserve horizontal velocity");
+        expectNear (still.velocity.y, phrase.velocity.y,
+                    "Untouched phrases preserve vertical velocity");
+    }
+
+    const auto bassPosition = phraseById (paused, "bass").position;
+    expect (engine.beginPhraseDrag ("drums"),
+            "A phrase can be caught while motion is frozen");
+    expect (engine.moveDraggedPhrase ("drums", bassPosition),
+            "A caught phrase can be repositioned while audio continues");
+    clock.advance (drift::engine::SpatialWorld::fixedStepSeconds);
+    engine.tick();
+    paused = engine.snapshot();
+    expect (phraseById (paused, "bass").pendingVariantId == "B",
+            "A manual collision still queues its musical transition while frozen");
+    expect (engine.throwPhrase ("drums", { 1.0, -0.5 }),
+            "A frozen reposition can complete through the ordinary release path");
+    expectNear (phraseById (engine.snapshot(), "drums").velocity.x, 0.0,
+                "A phrase repositioned while frozen has no resumed horizontal throw");
+    expectNear (phraseById (engine.snapshot(), "drums").velocity.y, 0.0,
+                "A phrase repositioned while frozen has no resumed vertical throw");
+
+    const auto melodyBeforeResume = phraseById (engine.snapshot(), "melody");
+    const auto drumsBeforeResume = phraseById (engine.snapshot(), "drums");
+    engine.setMotionPaused (false);
+    clock.advance (drift::engine::SpatialWorld::fixedStepSeconds);
+    engine.tick();
+    const auto resumed = engine.snapshot();
+    expect (! resumed.motionPaused && resumed.playing,
+            "Resume Motion leaves audio transport uninterrupted");
+    expect (std::abs (phraseById (resumed, "melody").position.x
+                     - melodyBeforeResume.position.x) > 1.0e-8,
+            "An untouched phrase resumes its preserved motion");
+    expectNear (phraseById (resumed, "drums").position.x, drumsBeforeResume.position.x,
+                "A repositioned phrase remains catchable after motion resumes");
+
+    engine.stop();
+    expect (! engine.snapshot().playing && engine.snapshot().motionPaused,
+            "Stop silences transport and freezes motion together");
+    expect (sink.messageCount() == 0 && sink.activeNoteCount() == 0,
+            "Coupled Stop still clears scheduled and active MIDI");
+    engine.play();
+    expect (engine.snapshot().playing && ! engine.snapshot().motionPaused,
+            "Play always resumes transport and motion together");
+}
+
 void testEngineIsIndependentOfUiUpdateTiming()
 {
     FakeClock clock;
@@ -1274,12 +1434,26 @@ void testBridgeRejectsInvalidCommandsBeforeMutation()
         {},
         {},
         [] (const std::string& phraseId) { return phraseId == "bass"; },
+        [&engine] (bool paused) { engine.setMotionPaused (paused); },
     };
 
     const auto playResult = drift::ui::dispatchCommandEnvelope (
         makeCommandEnvelope ("ui-play", "transport.play", makeObject()), handlers);
     expect (playResult.command.has_value(), "A valid versioned Play envelope is accepted");
     expect (engine.snapshot().playing, "The accepted Play command reaches transport state");
+    const auto freezeResult = drift::ui::dispatchCommandEnvelope (
+        makeCommandEnvelope (
+            "ui-freeze", "world.setMotionPaused", makeMotionPayload (juce::var { true })),
+        handlers);
+    expect (freezeResult.command.has_value() && engine.snapshot().motionPaused
+                && engine.snapshot().playing,
+            "A valid motion command freezes only the world");
+    drift::ui::dispatchCommandEnvelope (
+        makeCommandEnvelope (
+            "ui-resume", "world.setMotionPaused", makeMotionPayload (juce::var { false })),
+        handlers);
+    expect (! engine.snapshot().motionPaused && engine.snapshot().playing,
+            "A valid motion command resumes only the world");
     const auto scheduledBeforeRejections = sink.messages();
 
     const auto expectRejected = [&] (juce::var command,
@@ -1299,6 +1473,11 @@ void testBridgeRejectsInvalidCommandsBeforeMutation()
         makeCommandEnvelope ("ui-type", "transport.rewind", makeObject()),
         drift::ui::CommandRejectionCode::unknownCommand,
         "An unknown command type is rejected");
+    expectRejected (
+        makeCommandEnvelope (
+            "ui-motion", "world.setMotionPaused", makeMotionPayload (juce::var { "yes" })),
+        drift::ui::CommandRejectionCode::invalidPayload,
+        "A non-boolean motion state is rejected");
     expectRejected (
         makeCommandEnvelope ("bad message id", "transport.stop", makeObject()),
         drift::ui::CommandRejectionCode::invalidMessageId,
@@ -1412,6 +1591,7 @@ void testBridgeReconnectPreservesNativePlayback()
         {},
         {},
         {},
+        {},
     };
 
     drift::ui::dispatchCommandEnvelope (
@@ -1470,12 +1650,14 @@ int main()
     testSpatialWorldBoundsCatchUpWork();
     testSpatialWorldDragLifecycle();
     testSpatialWorldThrowLifecycle();
+    testSpatialWorldMotionPauseLifecycle();
     testSpatialWorldCollisionContactLifecycle();
     testEngineCommandQueueCoalescingAndPressure();
     testCollisionQueuesAndAppliesBassVariantAtBar();
     testEveryCollisionPairQueuesItsMappedTarget();
     testSimultaneousCollisionsUseStablePriority();
     testFourPhrasesShareOneTransport();
+    testMotionPauseDoesNotInterruptPlayback();
     testEngineIsIndependentOfUiUpdateTiming();
     testMidiOutputSelectionAndReplacement();
     testMidiOutputRoutesTimestampedPhrase();

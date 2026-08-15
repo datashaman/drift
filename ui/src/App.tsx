@@ -49,6 +49,13 @@ export function App({ bridge }: AppProps) {
     }))
   }
 
+  const toggleMotion = () => {
+    transportBridge.send(createCommand({
+      type: 'world.setMotionPaused',
+      payload: { paused: !worldSnapshot.motionPaused },
+    }))
+  }
+
   const commitTempo = () => {
     const bpm = Number(tempoDraft)
     if (Number.isFinite(bpm) && bpm >= 40 && bpm <= 240) {
@@ -72,7 +79,9 @@ export function App({ bridge }: AppProps) {
   const controlsReady = transportBridge.connected && bridgeReady
 
   return (
-    <main className={`shell ${transport.playing ? 'is-playing' : 'is-stopped'}`}>
+    <main
+      className={`shell ${transport.playing ? 'is-playing' : 'is-stopped'} ${worldSnapshot.motionPaused ? 'is-motion-paused' : 'is-motion-moving'}`}
+    >
       <header className="masthead">
         <div>
           <p className="eyebrow">Spatial phrase sequencer</p>
@@ -88,6 +97,17 @@ export function App({ bridge }: AppProps) {
           >
             <span aria-hidden="true">{transport.playing ? '■' : '▶'}</span>
             {transport.playing ? 'Stop' : 'Play'}
+          </button>
+
+          <button
+            aria-pressed={worldSnapshot.motionPaused}
+            className="motion-button"
+            disabled={!controlsReady || !transport.playing}
+            onClick={toggleMotion}
+            type="button"
+          >
+            <span aria-hidden="true">{worldSnapshot.motionPaused ? '▶' : 'Ⅱ'}</span>
+            {worldSnapshot.motionPaused ? 'Resume Motion' : 'Freeze Motion'}
           </button>
 
           <label className="tempo-control">
@@ -171,9 +191,11 @@ export function App({ bridge }: AppProps) {
         <p className="field-note">
           {worldSnapshot.phrases.length === 0
             ? 'Awaiting authoritative world snapshot.'
-            : transport.midiStatus === 'connected'
-              ? 'Four-phrase composition online.'
-              : 'Select a MIDI output to hear the four-phrase composition.'}
+            : worldSnapshot.motionPaused && transport.playing
+              ? 'Motion frozen. Drag phrases to reposition while playback continues.'
+              : transport.midiStatus === 'connected'
+                ? 'Four-phrase composition online.'
+                : 'Select a MIDI output to hear the four-phrase composition.'}
         </p>
       </section>
 
@@ -232,6 +254,10 @@ export function App({ bridge }: AppProps) {
           <div>
             <dt>Physics</dt>
             <dd>{worldSnapshot.diagnostics.physicsStepCount} steps</dd>
+          </div>
+          <div>
+            <dt>Motion</dt>
+            <dd>{worldSnapshot.motionPaused ? 'Frozen' : 'Moving'}</dd>
           </div>
           {worldSnapshot.collisions.map((collision) => (
             <div key={`${collision.firstPhraseId}:${collision.secondPhraseId}`}>

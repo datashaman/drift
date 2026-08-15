@@ -72,6 +72,7 @@ export interface CollisionSnapshot {
 export interface WorldSnapshot {
   sequence: number
   engineTimeMs: number
+  motionPaused: boolean
   transport: {
     playing: boolean
     bpm: number
@@ -130,6 +131,7 @@ export const initialTransportState: TransportState = {
 export const initialWorldSnapshot: WorldSnapshot = {
   sequence: 0,
   engineTimeMs: 0,
+  motionPaused: true,
   transport: { playing: false, bpm: 120, bar: 1, beat: 1 },
   phrases: [],
   collisions: [],
@@ -154,6 +156,7 @@ export type TransportCommand =
   | { type: 'app.connect'; payload: Record<string, never> }
   | { type: 'transport.play'; payload: Record<string, never> }
   | { type: 'transport.stop'; payload: Record<string, never> }
+  | { type: 'world.setMotionPaused'; payload: { paused: boolean } }
   | { type: 'transport.setTempo'; payload: { bpm: number } }
   | { type: 'midi.selectOutput'; payload: { outputId: string } }
   | {
@@ -318,6 +321,7 @@ function isWorldSnapshot(payload: unknown): payload is WorldSnapshot {
     (snapshot.sequence ?? 0) < 1 ||
     !isFiniteNumber(snapshot.engineTimeMs) ||
     snapshot.engineTimeMs < 0 ||
+    typeof snapshot.motionPaused !== 'boolean' ||
     typeof transport !== 'object' ||
     transport === null ||
     typeof transport.playing !== 'boolean' ||

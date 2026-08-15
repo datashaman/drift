@@ -74,7 +74,30 @@ body {
   cursor: pointer;
 }
 
+.motion-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 126px;
+  padding: 11px 15px;
+  border: 1px solid rgba(164, 155, 232, 0.58);
+  border-radius: 999px;
+  color: var(--ink);
+  background: rgba(164, 155, 232, 0.12);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.motion-button[aria-pressed="true"] {
+  border-color: rgba(240, 201, 107, 0.72);
+  color: var(--sun);
+  background: rgba(240, 201, 107, 0.1);
+}
+
 .transport-button:disabled,
+.motion-button:disabled,
 .tempo-control input:disabled,
 .midi-output-control select:disabled {
   cursor: not-allowed;
@@ -82,6 +105,7 @@ body {
 }
 
 .transport-button:focus-visible,
+.motion-button:focus-visible,
 .tempo-control input:focus-visible,
 .midi-output-control select:focus-visible {
   outline: 2px solid var(--sun);

@@ -44,6 +44,7 @@ struct SimulationResult
     int uiObservationCount = 0;
     int dragMoveCount = 0;
     int throwCount = 0;
+    int motionPauseToggleCount = 0;
 };
 
 juce::var makeConnectCommand (int sequence)
@@ -77,6 +78,7 @@ SimulationResult runSimulation (bool stressUi)
         {},
         {},
         {},
+        {},
     };
     SimulationResult result;
     auto previousWatermark = 0.0;
@@ -92,6 +94,13 @@ SimulationResult runSimulation (bool stressUi)
 
         if (stressUi)
         {
+            const auto motionPhase = tick % 20000;
+            if (motionPhase == 5000 || motionPhase == 10000)
+            {
+                engine.setMotionPaused (motionPhase == 5000);
+                ++result.motionPauseToggleCount;
+            }
+
             const auto dragPhase = tick % 3000;
             const std::array<std::string, 4> phraseIds {
                 "drums", "bass", "chords", "melody"
@@ -289,6 +298,8 @@ int main()
              "the harness did not generate sustained drag pressure");
     require (stressed.throwCount >= 95,
              "the harness did not rapidly throw all four phrases");
+    require (stressed.motionPauseToggleCount >= 20 && ! stressed.snapshot.motionPaused,
+             "the harness did not repeatedly freeze and resume world motion");
     require (stressed.snapshot.diagnostics.collisionIntentQueuedCount >= 1
                  && stressed.snapshot.diagnostics.collisionTransitionAppliedCount >= 1,
              "the stress run did not exercise the collision transition path");
@@ -302,6 +313,7 @@ int main()
               << "UI observations: " << stressed.uiObservationCount << '\n'
               << "Drag moves: " << stressed.dragMoveCount << '\n'
               << "Throws: " << stressed.throwCount << '\n'
+              << "Motion pause toggles: " << stressed.motionPauseToggleCount << '\n'
               << "Bridge reconnects: "
               << stressed.snapshot.diagnostics.bridgeReconnectCount << '\n'
               << "Physics steps: " << stressed.snapshot.diagnostics.physicsStepCount << '\n'

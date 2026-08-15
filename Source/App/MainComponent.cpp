@@ -102,6 +102,10 @@ void MainComponent::handleCommand (juce::var command)
         case drift::ui::BridgeCommandType::transportStop:
             engineCommand.type = drift::engine::EngineCommandType::transportStop;
             break;
+        case drift::ui::BridgeCommandType::worldSetMotionPaused:
+            engineCommand.type = drift::engine::EngineCommandType::worldSetMotionPaused;
+            engineCommand.motionPaused = validated.motionPaused;
+            break;
         case drift::ui::BridgeCommandType::transportSetTempo:
             engineCommand.type = drift::engine::EngineCommandType::transportSetTempo;
             break;
@@ -271,6 +275,7 @@ void MainComponent::publishWorldSnapshot (const drift::engine::ControllerSnapsho
     auto* payload = new juce::DynamicObject();
     payload->setProperty ("sequence", static_cast<juce::int64> (++worldSnapshotSequence));
     payload->setProperty ("engineTimeMs", state.transport.engineTimeSeconds * 1000.0);
+    payload->setProperty ("motionPaused", state.transport.motionPaused);
 
     auto* transport = new juce::DynamicObject();
     transport->setProperty ("playing", state.transport.playing);
