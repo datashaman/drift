@@ -8,6 +8,9 @@ function snapshot(sequence: number, x: number, y: number): WorldSnapshot {
     sequence,
     engineTimeMs: sequence * 33,
     motionPaused: false,
+    proximityMode: 'rhythmProfiles',
+    pendingProximityMode: null,
+    pendingProximityModeApplyBeat: null,
     transport: { playing: true, bpm: 120, bar: 1, beat: 1 },
     phrases: [
       {
@@ -31,6 +34,7 @@ function snapshot(sequence: number, x: number, y: number): WorldSnapshot {
       },
     ],
     collisions: [],
+    proximityPairs: [],
     diagnostics: {
       physicsStepCount: sequence * 4,
       physicsCatchUpStepCount: 0,
@@ -42,6 +46,13 @@ function snapshot(sequence: number, x: number, y: number): WorldSnapshot {
       speedIntentQueuedCount: 0,
       speedIntentSuppressedCount: 0,
       speedTransitionAppliedCount: 0,
+      proximityLevelChangeCount: 0,
+      proximityIntentQueuedCount: 0,
+      proximityIntentCoalescedCount: 0,
+      proximityIntentSuppressedCount: 0,
+      proximityTransitionAppliedCount: 0,
+      proximityModeQueuedCount: 0,
+      proximityModeAppliedCount: 0,
       droppedSnapshotCount: sequence * 3,
       maximumSnapshotIntervalMs: 34,
       commandQueueDepth: 0,

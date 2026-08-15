@@ -74,6 +74,27 @@ TransportEngine::TransportEngine (Clock& clockIn, music::MidiSink& sinkIn)
             0,
             true);
     }
+    for (const auto& rule : collisionVariantRules())
+    {
+        proximityPairs.push_back ({
+            rule.firstPhraseId,
+            rule.secondPhraseId,
+            {},
+            CouplingLevel::loose,
+            std::nullopt,
+            std::nullopt,
+        });
+        const auto& first = *std::find_if (
+            bodies.begin(), bodies.end(), [&rule] (const auto& body) {
+                return body.phraseId == rule.firstPhraseId;
+            });
+        const auto& second = *std::find_if (
+            bodies.begin(), bodies.end(), [&rule] (const auto& body) {
+                return body.phraseId == rule.secondPhraseId;
+            });
+        proximityPairs.back().tracker.observe (
+            normalizedPairProximity (first, second), 0);
+    }
 }
 
 void TransportEngine::play()
@@ -102,6 +123,13 @@ void TransportEngine::stop()
         phrase.pendingVariantApplyBeat.reset();
         pendingSpeedBands[phrase.id].reset();
     }
+    for (auto& pair : proximityPairs)
+    {
+        pair.pendingLevel.reset();
+        pair.pendingApplyBeat.reset();
+    }
+    pendingProximityMode.reset();
+    pendingProximityModeApplyBeat.reset();
 }
 
 void TransportEngine::setMotionPaused (bool paused)
@@ -110,6 +138,27 @@ void TransportEngine::setMotionPaused (bool paused)
         return;
 
     world.setMotionPaused (paused);
+}
+
+void TransportEngine::setProximityAuditionMode (ProximityAuditionMode mode)
+{
+    if (mode == proximityMode && ! pendingProximityMode)
+        return;
+
+    const auto state = transport.snapshot();
+    const auto earliestUnscheduledBeat = std::max (state.beatPosition, scheduledThroughBeat)
+                                         + timingToleranceSeconds;
+    const auto applyAtBeat = music::quantizeForward (
+        earliestUnscheduledBeat, barLengthBeats);
+    if (mode == proximityMode)
+    {
+        pendingProximityMode.reset();
+        pendingProximityModeApplyBeat.reset();
+        return;
+    }
+    pendingProximityMode = mode;
+    pendingProximityModeApplyBeat = applyAtBeat;
+    ++diagnostics.proximityModeQueuedCount;
 }
 
 bool TransportEngine::setBpm (double bpm)
@@ -149,6 +198,7 @@ void TransportEngine::tick()
     const auto state = transport.snapshot();
     processCollisionContacts (state.beatPosition);
     processSpeedActivity (state.beatPosition, fixedSteps);
+    processProximity (state.beatPosition);
     applyDueIntents (state.beatPosition);
 
     if (! state.playing)
@@ -179,6 +229,66 @@ void TransportEngine::tick()
     scheduledThroughBeat = horizonBeat;
     diagnostics.schedulingWatermarkBeat = std::max (
         diagnostics.schedulingWatermarkBeat, scheduledThroughBeat);
+}
+
+void TransportEngine::processProximity (double currentBeat)
+{
+    for (const auto& bodies : world.stepBodySnapshots())
+    {
+        for (auto& pair : proximityPairs)
+        {
+            const auto first = std::find_if (
+                bodies.begin(), bodies.end(), [&pair] (const auto& body) {
+                    return body.phraseId == pair.firstPhraseId;
+                });
+            const auto second = std::find_if (
+                bodies.begin(), bodies.end(), [&pair] (const auto& body) {
+                    return body.phraseId == pair.secondPhraseId;
+                });
+            if (first == bodies.end() || second == bodies.end())
+                continue;
+
+            const auto change = pair.tracker.observe (
+                normalizedPairProximity (*first, *second));
+            if (! change)
+                continue;
+
+            ++diagnostics.proximityLevelChangeCount;
+            const auto earliestUnscheduledBeat = std::max (currentBeat, scheduledThroughBeat)
+                                                 + timingToleranceSeconds;
+            const auto applyAtBeat = music::quantizeForward (
+                earliestUnscheduledBeat, barLengthBeats);
+
+            if (pair.pendingLevel && pair.pendingApplyBeat)
+            {
+                if (std::abs (*pair.pendingApplyBeat - applyAtBeat)
+                    <= timingToleranceSeconds)
+                {
+                    if (*change == pair.activeLevel)
+                    {
+                        pair.pendingLevel.reset();
+                        pair.pendingApplyBeat.reset();
+                    }
+                    else
+                    {
+                        pair.pendingLevel = *change;
+                    }
+                    ++diagnostics.proximityIntentCoalescedCount;
+                }
+                else
+                {
+                    ++diagnostics.proximityIntentSuppressedCount;
+                }
+                continue;
+            }
+
+            if (*change == pair.activeLevel)
+                continue;
+            pair.pendingLevel = *change;
+            pair.pendingApplyBeat = applyAtBeat;
+            ++diagnostics.proximityIntentQueuedCount;
+        }
+    }
 }
 
 void TransportEngine::processCollisionContacts (double currentBeat)
@@ -306,6 +416,26 @@ void TransportEngine::applyDueIntents (double currentBeat)
         }
         pendingSpeedBands[phrase.id].reset();
     }
+
+    for (auto& pair : proximityPairs)
+    {
+        if (! pair.pendingLevel || ! pair.pendingApplyBeat
+            || currentBeat + timingToleranceSeconds < *pair.pendingApplyBeat)
+            continue;
+        pair.activeLevel = *pair.pendingLevel;
+        pair.pendingLevel.reset();
+        pair.pendingApplyBeat.reset();
+        ++diagnostics.proximityTransitionAppliedCount;
+    }
+
+    if (pendingProximityMode && pendingProximityModeApplyBeat
+        && currentBeat + timingToleranceSeconds >= *pendingProximityModeApplyBeat)
+    {
+        proximityMode = *pendingProximityMode;
+        pendingProximityMode.reset();
+        pendingProximityModeApplyBeat.reset();
+        ++diagnostics.proximityModeAppliedCount;
+    }
 }
 
 void TransportEngine::schedulePhraseRange (const music::Phrase& phrase,
@@ -313,32 +443,103 @@ void TransportEngine::schedulePhraseRange (const music::Phrase& phrase,
                                            double endBeat,
                                            music::MidiSink& targetSink) const
 {
-    if (! phrase.pendingVariantId || ! phrase.pendingVariantApplyBeat)
-    {
-        scheduler.scheduleRange (phrase, startBeat, endBeat, targetSink);
-        return;
-    }
+    std::vector<double> boundaries { startBeat, endBeat };
+    const auto addBoundary = [&boundaries, startBeat, endBeat] (
+        const std::optional<double>& boundary) {
+        if (boundary && *boundary > startBeat && *boundary < endBeat)
+            boundaries.push_back (*boundary);
+    };
+    addBoundary (phrase.pendingVariantApplyBeat);
+    addBoundary (pendingProximityModeApplyBeat);
+    for (const auto& pair : proximityPairs)
+        if (pair.firstPhraseId == phrase.id || pair.secondPhraseId == phrase.id)
+            addBoundary (pair.pendingApplyBeat);
 
-    const auto applyAtBeat = *phrase.pendingVariantApplyBeat;
-    if (startBeat < applyAtBeat)
+    std::sort (boundaries.begin(), boundaries.end());
+    boundaries.erase (std::unique (boundaries.begin(), boundaries.end()), boundaries.end());
+    for (std::size_t index = 0; index + 1 < boundaries.size(); ++index)
     {
-        scheduler.scheduleRange (
-            phrase, startBeat, std::min (endBeat, applyAtBeat), targetSink);
-    }
-
-    if (endBeat <= applyAtBeat)
-        return;
-
-    const auto* pendingVariant = music::findVariant (phrase, *phrase.pendingVariantId);
-    if (pendingVariant != nullptr)
-    {
+        const auto segmentStart = boundaries[index];
+        const auto segmentEnd = boundaries[index + 1];
         scheduler.scheduleRange (
             phrase,
-            pendingVariant->events,
-            std::max (startBeat, applyAtBeat),
-            endBeat,
+            proximityEventsAt (phrase, segmentStart),
+            segmentStart,
+            segmentEnd,
             targetSink);
     }
+}
+
+const std::vector<music::NoteEvent>& TransportEngine::baseEventsAt (
+    const music::Phrase& phrase,
+    double beat) const
+{
+    if (phrase.pendingVariantId && phrase.pendingVariantApplyBeat
+        && beat + timingToleranceSeconds >= *phrase.pendingVariantApplyBeat)
+    {
+        if (const auto* variant = music::findVariant (phrase, *phrase.pendingVariantId))
+            return variant->events;
+    }
+    return phrase.events;
+}
+
+std::vector<music::NoteEvent> TransportEngine::proximityEventsAt (
+    const music::Phrase& phrase,
+    double beat) const
+{
+    auto mode = proximityMode;
+    if (pendingProximityMode && pendingProximityModeApplyBeat
+        && beat + timingToleranceSeconds >= *pendingProximityModeApplyBeat)
+        mode = *pendingProximityMode;
+
+    const auto levelAt = [beat] (const ProximityPairRuntime& pair) {
+        if (pair.pendingLevel && pair.pendingApplyBeat
+            && beat + timingToleranceSeconds >= *pair.pendingApplyBeat)
+            return *pair.pendingLevel;
+        return pair.activeLevel;
+    };
+
+    const auto& base = baseEventsAt (phrase, beat);
+    if (mode == ProximityAuditionMode::rhythmProfiles)
+    {
+        auto maximumLevel = CouplingLevel::loose;
+        for (const auto& pair : proximityPairs)
+        {
+            if (pair.firstPhraseId == phrase.id || pair.secondPhraseId == phrase.id)
+            {
+                const auto level = levelAt (pair);
+                if (couplingLevelRank (level) > couplingLevelRank (maximumLevel))
+                    maximumLevel = level;
+            }
+        }
+        return applyRhythmProfile (base, maximumLevel, phrase.lengthBeats);
+    }
+
+    auto accented = base;
+    for (auto& event : accented)
+    {
+        auto boost = 0;
+        for (const auto& pair : proximityPairs)
+        {
+            std::string partnerId;
+            if (pair.firstPhraseId == phrase.id)
+                partnerId = pair.secondPhraseId;
+            else if (pair.secondPhraseId == phrase.id)
+                partnerId = pair.firstPhraseId;
+            else
+                continue;
+            const auto partner = std::find_if (
+                phrases.begin(), phrases.end(), [&partnerId] (const auto& candidate) {
+                    return candidate.id == partnerId;
+                });
+            if (partner == phrases.end())
+                continue;
+            boost = std::max (boost, sharedAccentBoost (
+                event.beat, baseEventsAt (*partner, beat), levelAt (pair)));
+        }
+        event.velocity = std::min (127, event.velocity + boost);
+    }
+    return accented;
 }
 
 music::Phrase* TransportEngine::findPhrase (const std::string& phraseId) noexcept
@@ -436,6 +637,21 @@ EngineSnapshot TransportEngine::snapshot() const
         });
     }
 
+    std::vector<ProximityPairSnapshot> proximitySnapshots;
+    proximitySnapshots.reserve (proximityPairs.size());
+    for (const auto& pair : proximityPairs)
+    {
+        proximitySnapshots.push_back ({
+            pair.firstPhraseId,
+            pair.secondPhraseId,
+            pair.tracker.rawProximity(),
+            pair.tracker.smoothedProximity(),
+            pair.activeLevel,
+            pair.pendingLevel,
+            pair.pendingApplyBeat,
+        });
+    }
+
     return {
         state.playing,
         world.motionPaused(),
@@ -448,6 +664,10 @@ EngineSnapshot TransportEngine::snapshot() const
         sink.messageCount(),
         std::move (phraseSnapshots),
         std::move (collisionSnapshots),
+        std::move (proximitySnapshots),
+        proximityMode,
+        pendingProximityMode,
+        pendingProximityModeApplyBeat,
         snapshotDiagnostics,
     };
 }

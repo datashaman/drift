@@ -50,6 +50,9 @@ function worldEvent(
       sequence,
       engineTimeMs: 1250,
       motionPaused: false,
+      proximityMode: 'rhythmProfiles',
+      pendingProximityMode: null,
+      pendingProximityModeApplyBeat: null,
       transport: { playing: true, bpm: 120, bar: 1, beat: 3.5 },
       diagnostics: {
         physicsStepCount: 150,
@@ -62,6 +65,13 @@ function worldEvent(
         speedIntentQueuedCount: 0,
         speedIntentSuppressedCount: 0,
         speedTransitionAppliedCount: 0,
+        proximityLevelChangeCount: 0,
+        proximityIntentQueuedCount: 0,
+        proximityIntentCoalescedCount: 0,
+        proximityIntentSuppressedCount: 0,
+        proximityTransitionAppliedCount: 0,
+        proximityModeQueuedCount: 0,
+        proximityModeAppliedCount: 0,
         droppedSnapshotCount: 112,
         maximumSnapshotIntervalMs: 34.2,
         commandQueueDepth: 2,
@@ -77,6 +87,14 @@ function worldEvent(
         { firstPhraseId: 'chords', secondPhraseId: 'drums', targetPhraseId: 'drums', touching: false, cooldownRemainingMs: 0 },
         { firstPhraseId: 'chords', secondPhraseId: 'melody', targetPhraseId: 'chords', touching: false, cooldownRemainingMs: 0 },
         { firstPhraseId: 'drums', secondPhraseId: 'melody', targetPhraseId: 'melody', touching: false, cooldownRemainingMs: 0 },
+      ],
+      proximityPairs: [
+        { firstPhraseId: 'bass', secondPhraseId: 'chords', rawProximity: 0.1, smoothedProximity: 0.08, couplingLevel: 'loose', pendingCouplingLevel: null, pendingApplyBeat: null },
+        { firstPhraseId: 'bass', secondPhraseId: 'drums', rawProximity: 0.2, smoothedProximity: 0.18, couplingLevel: 'loose', pendingCouplingLevel: null, pendingApplyBeat: null },
+        { firstPhraseId: 'bass', secondPhraseId: 'melody', rawProximity: 0, smoothedProximity: 0, couplingLevel: 'loose', pendingCouplingLevel: null, pendingApplyBeat: null },
+        { firstPhraseId: 'chords', secondPhraseId: 'drums', rawProximity: 0.3, smoothedProximity: 0.25, couplingLevel: 'loose', pendingCouplingLevel: null, pendingApplyBeat: null },
+        { firstPhraseId: 'chords', secondPhraseId: 'melody', rawProximity: 0, smoothedProximity: 0, couplingLevel: 'loose', pendingCouplingLevel: null, pendingApplyBeat: null },
+        { firstPhraseId: 'drums', secondPhraseId: 'melody', rawProximity: 0.3, smoothedProximity: 0.27, couplingLevel: 'loose', pendingCouplingLevel: null, pendingApplyBeat: null },
       ],
       phrases: [
         {
@@ -238,6 +256,13 @@ describe('Drift bridge interface', () => {
             speedIntentQueuedCount: 0,
             speedIntentSuppressedCount: 0,
             speedTransitionAppliedCount: 0,
+            proximityLevelChangeCount: 0,
+            proximityIntentQueuedCount: 0,
+            proximityIntentCoalescedCount: 0,
+            proximityIntentSuppressedCount: 0,
+            proximityTransitionAppliedCount: 0,
+            proximityModeQueuedCount: 0,
+            proximityModeAppliedCount: 0,
             commandQueueDepth: 2,
             maximumCommandQueueDepth: 7,
             coalescedMoveCount: 12,
@@ -256,6 +281,14 @@ describe('Drift bridge interface', () => {
     expect(screen.getByText('9.70 beats')).toBeTruthy()
     expect(screen.getByText('0.125 ms')).toBeTruthy()
     expect(screen.getByText('Moving')).toBeTruthy()
+
+    fireEvent.change(screen.getByLabelText('Proximity audition mode'), {
+      target: { value: 'sharedAccents' },
+    })
+    expect(bridge.commands.at(-1)).toMatchObject({
+      type: 'proximity.setAuditionMode',
+      payload: { mode: 'sharedAccents' },
+    })
 
     fireEvent.click(screen.getByRole('button', { name: /freeze motion/i }))
     expect(bridge.commands.at(-1)).toMatchObject({
@@ -333,6 +366,16 @@ describe('Drift bridge interface', () => {
     invalidMotion.payload.motionPaused = 'yes' as unknown as boolean
     eventListener?.(invalidMotion)
     expect(receivedWorldSequence).toBe(5)
+
+    const invalidProximity = worldEvent(11)
+    invalidProximity.payload.proximityPairs[0].rawProximity = 1.2
+    eventListener?.(invalidProximity)
+    expect(receivedWorldSequence).toBe(5)
+
+    const invalidMode = worldEvent(12)
+    invalidMode.payload.proximityMode = 'random' as 'rhythmProfiles'
+    eventListener?.(invalidMode)
+    expect(receivedWorldSequence).toBe(5)
   })
 
   it('renders four phrases from the latest authoritative world snapshot', () => {
@@ -355,14 +398,25 @@ describe('Drift bridge interface', () => {
     expect(container.textContent).toContain('→ chords / clear / 0 ms')
     expect(container.textContent).toContain('drums + melody')
     expect(container.textContent).toContain('→ melody / clear / 0 ms')
+    expect(container.textContent).toContain('bass ↔ chords')
+    expect(container.textContent).toContain('loose / 0.10 raw / 0.08 smooth')
 
-    const pendingWorld = worldEvent(5)
+    const pendingProximity = worldEvent(5)
+    pendingProximity.payload.proximityPairs[0].pendingCouplingLevel = 'linked'
+    pendingProximity.payload.proximityPairs[0].pendingApplyBeat = 4
+    pendingProximity.payload.pendingProximityMode = 'sharedAccents'
+    pendingProximity.payload.pendingProximityModeApplyBeat = 4
+    act(() => bridge.publish(pendingProximity))
+    expect(container.textContent).toContain('loose → linked')
+    expect(container.textContent).toContain('Rhythm profiles → Shared accents')
+
+    const pendingWorld = worldEvent(6)
     pendingWorld.payload.phrases[1].pendingVariantId = 'B'
     pendingWorld.payload.phrases[1].pendingVariantApplyBeat = 4
     act(() => bridge.publish(pendingWorld))
     expect(screen.getByText(/BASS · A → B/)).toBeTruthy()
 
-    const appliedWorld = worldEvent(6)
+    const appliedWorld = worldEvent(7)
     appliedWorld.payload.phrases[1].currentVariantId = 'B'
     act(() => bridge.publish(appliedWorld))
     expect(screen.getByText(/BASS · B · normal · speed .* · playing/)).toBeTruthy()

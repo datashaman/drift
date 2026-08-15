@@ -60,6 +60,8 @@ add_library(DriftEngine STATIC
     Source/Engine/Clock.h
     Source/Engine/EngineCommandQueue.cpp
     Source/Engine/EngineCommandQueue.h
+    Source/Engine/ProximityRhythmMapping.cpp
+    Source/Engine/ProximityRhythmMapping.h
     Source/Engine/SpatialWorld.cpp
     Source/Engine/SpatialWorld.h
     Source/Engine/SpeedActivityMapping.cpp

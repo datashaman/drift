@@ -77,6 +77,7 @@ export function App({ bridge }: AppProps) {
         : 'Disconnected'
 
   const controlsReady = transportBridge.connected && bridgeReady
+  const proximityModeValue = worldSnapshot.pendingProximityMode ?? worldSnapshot.proximityMode
 
   return (
     <main
@@ -150,6 +151,24 @@ export function App({ bridge }: AppProps) {
                   {output.name}
                 </option>
               ))}
+            </select>
+          </label>
+
+          <label className="proximity-mode-control">
+            <span>Proximity</span>
+            <select
+              aria-label="Proximity audition mode"
+              disabled={!controlsReady}
+              onChange={(event) =>
+                transportBridge.send(createCommand({
+                  type: 'proximity.setAuditionMode',
+                  payload: { mode: event.target.value as 'rhythmProfiles' | 'sharedAccents' },
+                }))
+              }
+              value={proximityModeValue}
+            >
+              <option value="rhythmProfiles">Rhythm profiles</option>
+              <option value="sharedAccents">Shared accents</option>
             </select>
           </label>
         </div>
@@ -259,12 +278,30 @@ export function App({ bridge }: AppProps) {
             <dt>Motion</dt>
             <dd>{worldSnapshot.motionPaused ? 'Frozen' : 'Moving'}</dd>
           </div>
+          <div>
+            <dt>Proximity mode</dt>
+            <dd>
+              {worldSnapshot.proximityMode === 'rhythmProfiles' ? 'Rhythm profiles' : 'Shared accents'}
+              {worldSnapshot.pendingProximityMode
+                ? ` → ${worldSnapshot.pendingProximityMode === 'rhythmProfiles' ? 'Rhythm profiles' : 'Shared accents'}`
+                : ''}
+            </dd>
+          </div>
           {worldSnapshot.collisions.map((collision) => (
             <div key={`${collision.firstPhraseId}:${collision.secondPhraseId}`}>
               <dt>{collision.firstPhraseId} + {collision.secondPhraseId}</dt>
               <dd>
                 → {collision.targetPhraseId} / {collision.touching ? 'contact' : 'clear'} /{' '}
                 {collision.cooldownRemainingMs.toFixed(0)} ms
+              </dd>
+            </div>
+          ))}
+          {worldSnapshot.proximityPairs.map((pair) => (
+            <div key={`proximity:${pair.firstPhraseId}:${pair.secondPhraseId}`}>
+              <dt>{pair.firstPhraseId} ↔ {pair.secondPhraseId}</dt>
+              <dd>
+                {pair.couplingLevel}{pair.pendingCouplingLevel ? ` → ${pair.pendingCouplingLevel}` : ''} /{' '}
+                {pair.rawProximity.toFixed(2)} raw / {pair.smoothedProximity.toFixed(2)} smooth
               </dd>
             </div>
           ))}
@@ -292,6 +329,23 @@ export function App({ bridge }: AppProps) {
               {worldSnapshot.diagnostics.speedIntentQueuedCount} queued /{' '}
               {worldSnapshot.diagnostics.speedIntentSuppressedCount} suppressed /{' '}
               {worldSnapshot.diagnostics.speedTransitionAppliedCount} applied
+            </dd>
+          </div>
+          <div>
+            <dt>Proximity</dt>
+            <dd>
+              {worldSnapshot.diagnostics.proximityLevelChangeCount} levels /{' '}
+              {worldSnapshot.diagnostics.proximityIntentQueuedCount} queued /{' '}
+              {worldSnapshot.diagnostics.proximityIntentCoalescedCount} coalesced /{' '}
+              {worldSnapshot.diagnostics.proximityIntentSuppressedCount} suppressed /{' '}
+              {worldSnapshot.diagnostics.proximityTransitionAppliedCount} applied
+            </dd>
+          </div>
+          <div>
+            <dt>Mode changes</dt>
+            <dd>
+              {worldSnapshot.diagnostics.proximityModeQueuedCount} queued /{' '}
+              {worldSnapshot.diagnostics.proximityModeAppliedCount} applied
             </dd>
           </div>
           <div>

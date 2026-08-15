@@ -164,6 +164,8 @@ export function PhraseWorld({
       app.canvas.className = 'phrase-world-canvas'
       host.appendChild(app.canvas)
       const nodes = new Map<string, SceneNode>()
+      const relationshipLines = new Graphics()
+      app.stage.addChild(relationshipLines)
 
       const makeNode = (phrase: PhraseSnapshot): SceneNode => {
         const colour = colourForPhrase(phrase)
@@ -205,6 +207,23 @@ export function PhraseWorld({
         const amount = transition.durationMs <= 0 ? 1 : elapsed / transition.durationMs
         const phrases = interpolatePhrases(transition.previous, transition.current, amount)
         const activeIds = new Set(phrases.map((phrase) => phrase.id))
+        const phrasesById = new Map(phrases.map((phrase) => [phrase.id, phrase]))
+
+        relationshipLines.clear()
+        for (const pair of transition.current.proximityPairs) {
+          if (pair.smoothedProximity <= 0.01) continue
+          const first = phrasesById.get(pair.firstPhraseId)
+          const second = phrasesById.get(pair.secondPhraseId)
+          if (!first || !second) continue
+          relationshipLines
+            .moveTo(first.position.x * app.screen.width, first.position.y * app.screen.height)
+            .lineTo(second.position.x * app.screen.width, second.position.y * app.screen.height)
+            .stroke({
+              color: 0x6ed0c4,
+              width: 0.5 + pair.smoothedProximity * 2,
+              alpha: 0.04 + pair.smoothedProximity * 0.32,
+            })
+        }
 
         for (const [phraseId, node] of nodes) {
           if (activeIds.has(phraseId)) continue

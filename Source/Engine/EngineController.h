@@ -28,6 +28,7 @@ public:
     void play();
     void stop();
     void setMotionPaused (bool paused);
+    void setProximityAuditionMode (ProximityAuditionMode mode);
     bool setBpm (double bpm);
     bool selectMidiOutput (const std::string& outputId);
     CommandEnqueueResult enqueueCommand (EngineCommand command);

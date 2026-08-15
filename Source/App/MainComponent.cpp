@@ -106,6 +106,11 @@ void MainComponent::handleCommand (juce::var command)
             engineCommand.type = drift::engine::EngineCommandType::worldSetMotionPaused;
             engineCommand.motionPaused = validated.motionPaused;
             break;
+        case drift::ui::BridgeCommandType::proximitySetAuditionMode:
+            engineCommand.type = drift::engine::EngineCommandType::proximitySetAuditionMode;
+            engineCommand.proximityMode
+                = *drift::engine::proximityAuditionModeForName (validated.proximityMode);
+            break;
         case drift::ui::BridgeCommandType::transportSetTempo:
             engineCommand.type = drift::engine::EngineCommandType::transportSetTempo;
             break;
@@ -239,6 +244,20 @@ void MainComponent::publishState()
         state.transport.diagnostics.speedIntentSuppressedCount));
     diagnostics->setProperty ("speedTransitionAppliedCount", static_cast<juce::int64> (
         state.transport.diagnostics.speedTransitionAppliedCount));
+    diagnostics->setProperty ("proximityLevelChangeCount", static_cast<juce::int64> (
+        state.transport.diagnostics.proximityLevelChangeCount));
+    diagnostics->setProperty ("proximityIntentQueuedCount", static_cast<juce::int64> (
+        state.transport.diagnostics.proximityIntentQueuedCount));
+    diagnostics->setProperty ("proximityIntentCoalescedCount", static_cast<juce::int64> (
+        state.transport.diagnostics.proximityIntentCoalescedCount));
+    diagnostics->setProperty ("proximityIntentSuppressedCount", static_cast<juce::int64> (
+        state.transport.diagnostics.proximityIntentSuppressedCount));
+    diagnostics->setProperty ("proximityTransitionAppliedCount", static_cast<juce::int64> (
+        state.transport.diagnostics.proximityTransitionAppliedCount));
+    diagnostics->setProperty ("proximityModeQueuedCount", static_cast<juce::int64> (
+        state.transport.diagnostics.proximityModeQueuedCount));
+    diagnostics->setProperty ("proximityModeAppliedCount", static_cast<juce::int64> (
+        state.transport.diagnostics.proximityModeAppliedCount));
     diagnostics->setProperty (
         "commandQueueDepth", static_cast<juce::int64> (state.commandQueue.queueDepth));
     diagnostics->setProperty (
@@ -284,6 +303,21 @@ void MainComponent::publishWorldSnapshot (const drift::engine::ControllerSnapsho
     payload->setProperty ("sequence", static_cast<juce::int64> (++worldSnapshotSequence));
     payload->setProperty ("engineTimeMs", state.transport.engineTimeSeconds * 1000.0);
     payload->setProperty ("motionPaused", state.transport.motionPaused);
+    payload->setProperty (
+        "proximityMode",
+        juce::String { drift::engine::proximityAuditionModeName (
+            state.transport.proximityMode) });
+    payload->setProperty (
+        "pendingProximityMode",
+        state.transport.pendingProximityMode
+            ? juce::var { juce::String { drift::engine::proximityAuditionModeName (
+                  *state.transport.pendingProximityMode) } }
+            : juce::var {});
+    payload->setProperty (
+        "pendingProximityModeApplyBeat",
+        state.transport.pendingProximityModeApplyBeat
+            ? juce::var { *state.transport.pendingProximityModeApplyBeat }
+            : juce::var {});
 
     auto* transport = new juce::DynamicObject();
     transport->setProperty ("playing", state.transport.playing);
@@ -359,6 +393,30 @@ void MainComponent::publishWorldSnapshot (const drift::engine::ControllerSnapsho
     }
     payload->setProperty ("collisions", juce::var { collisions });
 
+    juce::Array<juce::var> proximityPairs;
+    for (const auto& pair : state.transport.proximityPairs)
+    {
+        auto* pairObject = new juce::DynamicObject();
+        pairObject->setProperty ("firstPhraseId", juce::String { pair.firstPhraseId });
+        pairObject->setProperty ("secondPhraseId", juce::String { pair.secondPhraseId });
+        pairObject->setProperty ("rawProximity", pair.rawProximity);
+        pairObject->setProperty ("smoothedProximity", pair.smoothedProximity);
+        pairObject->setProperty (
+            "couplingLevel",
+            juce::String { drift::engine::couplingLevelName (pair.couplingLevel) });
+        pairObject->setProperty (
+            "pendingCouplingLevel",
+            pair.pendingCouplingLevel
+                ? juce::var { juce::String { drift::engine::couplingLevelName (
+                      *pair.pendingCouplingLevel) } }
+                : juce::var {});
+        pairObject->setProperty (
+            "pendingApplyBeat",
+            pair.pendingApplyBeat ? juce::var { *pair.pendingApplyBeat } : juce::var {});
+        proximityPairs.add (juce::var { pairObject });
+    }
+    payload->setProperty ("proximityPairs", juce::var { proximityPairs });
+
     auto* diagnostics = new juce::DynamicObject();
     diagnostics->setProperty (
         "physicsStepCount",
@@ -387,6 +445,20 @@ void MainComponent::publishWorldSnapshot (const drift::engine::ControllerSnapsho
         state.transport.diagnostics.speedIntentSuppressedCount));
     diagnostics->setProperty ("speedTransitionAppliedCount", static_cast<juce::int64> (
         state.transport.diagnostics.speedTransitionAppliedCount));
+    diagnostics->setProperty ("proximityLevelChangeCount", static_cast<juce::int64> (
+        state.transport.diagnostics.proximityLevelChangeCount));
+    diagnostics->setProperty ("proximityIntentQueuedCount", static_cast<juce::int64> (
+        state.transport.diagnostics.proximityIntentQueuedCount));
+    diagnostics->setProperty ("proximityIntentCoalescedCount", static_cast<juce::int64> (
+        state.transport.diagnostics.proximityIntentCoalescedCount));
+    diagnostics->setProperty ("proximityIntentSuppressedCount", static_cast<juce::int64> (
+        state.transport.diagnostics.proximityIntentSuppressedCount));
+    diagnostics->setProperty ("proximityTransitionAppliedCount", static_cast<juce::int64> (
+        state.transport.diagnostics.proximityTransitionAppliedCount));
+    diagnostics->setProperty ("proximityModeQueuedCount", static_cast<juce::int64> (
+        state.transport.diagnostics.proximityModeQueuedCount));
+    diagnostics->setProperty ("proximityModeAppliedCount", static_cast<juce::int64> (
+        state.transport.diagnostics.proximityModeAppliedCount));
     diagnostics->setProperty (
         "droppedSnapshotCount", static_cast<juce::int64> (droppedWorldSnapshotCount));
     diagnostics->setProperty (

@@ -4,6 +4,7 @@
 #include "Engine/SpatialWorld.h"
 #include "Engine/TransportEngine.h"
 #include "Engine/SpeedActivityMapping.h"
+#include "Engine/ProximityRhythmMapping.h"
 #include "Music/MidiSink.h"
 #include "Music/MidiOutput.h"
 #include "Music/PhraseScheduler.h"
@@ -193,6 +194,13 @@ juce::var makeMotionPayload (juce::var paused)
 {
     auto* object = new juce::DynamicObject();
     object->setProperty ("paused", std::move (paused));
+    return juce::var { object };
+}
+
+juce::var makeProximityModePayload (juce::var mode)
+{
+    auto* object = new juce::DynamicObject();
+    object->setProperty ("mode", std::move (mode));
     return juce::var { object };
 }
 
@@ -456,6 +464,101 @@ void testSpeedActivityMappingAndSmoothing()
         jitter.observe (step % 2 == 0 ? 0.02 : 0.039, 1, false);
     expect (jitter.stableBand() == ActivityBand::normal,
             "Speed jitter inside the hysteresis window does not chatter bands");
+}
+
+void testProximityMappingAndTransformations()
+{
+    using drift::engine::CouplingLevel;
+    using drift::engine::PhraseBody;
+    using drift::engine::ProximityTracker;
+
+    const PhraseBody first { "first", { 0.1, 0.5 }, {}, 0.05, 1.0 };
+    expectNear (drift::engine::normalizedPairProximity (
+                    first, { "touching", { 0.2, 0.5 }, {}, 0.05, 1.0 }),
+                1.0, "Touching body surfaces have maximum normalized proximity");
+    expectNear (drift::engine::normalizedPairProximity (
+                    first, { "half", { 0.4, 0.5 }, {}, 0.05, 1.0 }),
+                0.5, "A 0.20 surface gap maps to half proximity");
+    expectNear (drift::engine::normalizedPairProximity (
+                    first, { "far", { 0.6, 0.5 }, {}, 0.05, 1.0 }),
+                0.0, "A 0.40 surface gap clamps to zero proximity");
+
+    using drift::engine::couplingLevelAfterObservation;
+    expect (couplingLevelAfterObservation (CouplingLevel::loose, 0.40)
+                == CouplingLevel::linked
+            && couplingLevelAfterObservation (CouplingLevel::linked, 0.31)
+                   == CouplingLevel::linked
+            && couplingLevelAfterObservation (CouplingLevel::linked, 0.30)
+                   == CouplingLevel::loose,
+            "Loose/linked hysteresis includes both exact thresholds");
+    expect (couplingLevelAfterObservation (CouplingLevel::linked, 0.75)
+                == CouplingLevel::tight
+            && couplingLevelAfterObservation (CouplingLevel::tight, 0.66)
+                   == CouplingLevel::tight
+            && couplingLevelAfterObservation (CouplingLevel::tight, 0.65)
+                   == CouplingLevel::linked,
+            "Linked/tight hysteresis includes both exact thresholds");
+
+    ProximityTracker smoothing;
+    smoothing.observe (0.1, 0);
+    smoothing.observe (0.9);
+    const auto alpha = 1.0 - std::exp (
+        -drift::engine::SpatialWorld::fixedStepSeconds
+        / ProximityTracker::smoothingTimeConstantSeconds);
+    expectNear (smoothing.smoothedProximity(), 0.1 + alpha * 0.8,
+                "Proximity smoothing advances by one deterministic physics step");
+    ProximityTracker jitter;
+    jitter.observe (0.35, 0);
+    for (auto step = 0; step < 1000; ++step)
+        jitter.observe (step % 2 == 0 ? 0.31 : 0.39);
+    expect (jitter.observedLevel() == CouplingLevel::loose,
+            "Proximity jitter below the entry threshold cannot flap coupling state");
+
+    const std::vector<drift::music::NoteEvent> source {
+        { 0.25, 60, 80, 0.25 },
+        { 0.75, 61, 81, 0.5 },
+        { 3.75, 60, 90, 0.75 },
+    };
+    const auto linked = drift::engine::applyRhythmProfile (
+        source, CouplingLevel::linked, 4.0);
+    expect (linked.size() == source.size()
+                && linked[0].beat == 0.0
+                && linked[1].beat == 0.5
+                && linked[2].beat == 1.0,
+            "Linked profiles snap to half beats, wrap the loop, and sort deterministically");
+    const auto tight = drift::engine::applyRhythmProfile (
+        source, CouplingLevel::tight, 4.0);
+    expect (tight.size() == 2 && tight[0].note == 60 && tight[0].velocity == 90
+                && tight[0].durationBeats == 0.75 && tight[1].beat == 1.0,
+            "Tight profiles snap to beats and coalesce exact pitch/onset duplicates");
+    expect (drift::engine::sharedAccentBoost (0.0, source, CouplingLevel::tight) == 0
+                && drift::engine::sharedAccentBoost (
+                       0.75, source, CouplingLevel::linked) == 12
+                && drift::engine::sharedAccentBoost (
+                       0.75, source, CouplingLevel::tight) == 24,
+            "Shared accents preserve weak pairs and apply the exact linked/tight boosts");
+
+    for (const auto& phrase : drift::music::makeInitialComposition())
+    {
+        for (const auto& variant : phrase.variants)
+        {
+            for (const auto level : { CouplingLevel::loose,
+                                      CouplingLevel::linked,
+                                      CouplingLevel::tight })
+            {
+                const auto transformed = drift::engine::applyRhythmProfile (
+                    variant.events, level, phrase.lengthBeats);
+                expect (std::all_of (
+                            transformed.begin(), transformed.end(), [&phrase] (const auto& event) {
+                                return event.beat >= 0.0 && event.beat < phrase.lengthBeats
+                                       && event.note >= 0 && event.note <= 127
+                                       && event.velocity > 0 && event.velocity <= 127
+                                       && event.durationBeats > 0.0;
+                            }),
+                        "Every role/activity/profile combination remains valid MIDI material");
+            }
+        }
+    }
 }
 
 void testCollisionVariantRulesAndCycle()
@@ -987,15 +1090,15 @@ void testCollisionQueuesAndAppliesBassVariantAtBar()
     expect (state.diagnostics.collisionTransitionAppliedCount == 1,
             "Exactly one applied transition is observable");
 
-    advanceToBeat (clock, engine, 4.6);
+    advanceToBeat (clock, engine, 4.9);
     const auto variantBNoteCount = std::count_if (
         sink.messages().begin(), sink.messages().end(), [] (const auto& message) {
             return message.type == drift::music::MidiMessageType::noteOn
                    && message.channel == 1 && message.note == 31
-                   && std::abs (message.beat - 4.75) < 1.0e-8;
+                   && std::abs (message.beat - 5.0) < 1.0e-8;
         });
     expect (variantBNoteCount == 1,
-            "Variant B schedules its distinguishing post-boundary note exactly once");
+            "Variant B composes with tight profile snapping exactly once");
     expect (sink.activeNoteCount() == 0,
             "The quantized variant transition preserves paired note-on and note-off output");
     expect (state.diagnostics.lateMidiEventCount == 0,
@@ -1270,6 +1373,148 @@ void testSpeedActivityQueuesQuantizedVariantsAndCollisionWins()
     expect (phraseById (draggedEngine.snapshot(), "chords").activityBand
                 == drift::engine::ActivityBand::active,
             "Ending a drag resumes observation from the retained native velocity");
+}
+
+void testProximityAuditionQuantizesWhileMotionIsFrozen()
+{
+    const auto phraseById = [] (const drift::engine::EngineSnapshot& snapshot,
+                                const std::string& phraseId)
+        -> const drift::engine::PhraseSnapshot& {
+        const auto phrase = std::find_if (
+            snapshot.phrases.begin(), snapshot.phrases.end(), [&] (const auto& candidate) {
+                return candidate.id == phraseId;
+            });
+        if (phrase == snapshot.phrases.end())
+            throw std::runtime_error ("Missing phrase snapshot");
+        return *phrase;
+    };
+    const auto pairByIds = [] (const drift::engine::EngineSnapshot& snapshot,
+                               const std::string& first,
+                               const std::string& second)
+        -> const drift::engine::ProximityPairSnapshot& {
+        const auto pair = std::find_if (
+            snapshot.proximityPairs.begin(), snapshot.proximityPairs.end(),
+            [&] (const auto& candidate) {
+                return candidate.firstPhraseId == first
+                       && candidate.secondPhraseId == second;
+            });
+        if (pair == snapshot.proximityPairs.end())
+            throw std::runtime_error ("Missing proximity pair snapshot");
+        return *pair;
+    };
+    const auto advanceToBeat = [] (FakeClock& clock,
+                                   drift::engine::TransportEngine& engine,
+                                   double targetBeat) {
+        while (engine.snapshot().beatPosition + 1.0e-9 < targetBeat)
+        {
+            clock.advance (0.002);
+            engine.tick();
+        }
+    };
+
+    FakeClock clock;
+    drift::music::RecordingMidiSink sink;
+    drift::engine::TransportEngine engine { clock, sink };
+    engine.play();
+    engine.setMotionPaused (true);
+    expect (engine.beginPhraseDrag ("bass")
+                && engine.moveDraggedPhrase ("bass", { 0.30, 0.50 }),
+            "The proximity fixture can reposition bass during Freeze Motion");
+    expect (engine.beginPhraseDrag ("chords")
+                && engine.moveDraggedPhrase ("chords", { 0.38, 0.50 }),
+            "The proximity fixture can reposition chords during Freeze Motion");
+
+    for (auto step = 0; step < 120; ++step)
+    {
+        clock.advance (drift::engine::SpatialWorld::fixedStepSeconds);
+        engine.tick();
+    }
+
+    auto snapshot = engine.snapshot();
+    auto pair = pairByIds (snapshot, "bass", "chords");
+    expect (snapshot.motionPaused && phraseById (snapshot, "bass").dragged,
+            "Frozen, directly dragged phrases remain under user control during observation");
+    expect (pair.rawProximity == 1.0 && pair.smoothedProximity > 0.95
+                && pair.couplingLevel == drift::engine::CouplingLevel::loose
+                && pair.pendingCouplingLevel == drift::engine::CouplingLevel::tight
+                && pair.pendingApplyBeat == 4.0,
+            "Close frozen phrases settle to a tight transition at the next bar");
+    expect (snapshot.diagnostics.proximityLevelChangeCount == 2
+                && snapshot.diagnostics.proximityIntentQueuedCount == 1
+                && snapshot.diagnostics.proximityIntentCoalescedCount == 1,
+            "Linked-to-tight settling coalesces into one unambiguous boundary state");
+    expect (phraseById (snapshot, "chords").pendingVariantId == "B",
+            "The same contact independently preserves its collision variant intent");
+
+    advanceToBeat (clock, engine, 4.0);
+    snapshot = engine.snapshot();
+    pair = pairByIds (snapshot, "bass", "chords");
+    expect (pair.couplingLevel == drift::engine::CouplingLevel::tight
+                && ! pair.pendingCouplingLevel && ! pair.pendingApplyBeat
+                && snapshot.diagnostics.proximityTransitionAppliedCount == 1,
+            "The tight coupling state applies and clears exactly at the bar");
+    expect (snapshot.playing && snapshot.motionPaused
+                && snapshot.diagnostics.lateMidiEventCount == 0,
+            "Proximity application does not interrupt frozen-motion playback or MIDI timing");
+
+    advanceToBeat (clock, engine, 6.1);
+    const auto snappedBassNote = std::count_if (
+        sink.messages().begin(), sink.messages().end(), [] (const auto& message) {
+            return message.type == drift::music::MidiMessageType::noteOn
+                   && message.channel == 1 && message.note == 36
+                   && std::abs (message.beat - 6.0) < 1.0e-8;
+        });
+    const auto unsnappedBassNote = std::count_if (
+        sink.messages().begin(), sink.messages().end(), [] (const auto& message) {
+            return message.type == drift::music::MidiMessageType::noteOn
+                   && message.channel == 1 && message.note == 36
+                   && std::abs (message.beat - 5.5) < 1.0e-8;
+        });
+    expect (snappedBassNote == 1 && unsnappedBassNote == 0,
+            "Tight rhythm-profile scheduling snaps bass onsets without duplicate delivery");
+
+    FakeClock accentClock;
+    drift::music::RecordingMidiSink accentSink;
+    drift::engine::TransportEngine accentEngine { accentClock, accentSink };
+    accentEngine.play();
+    accentEngine.setMotionPaused (true);
+    accentEngine.setProximityAuditionMode (
+        drift::engine::ProximityAuditionMode::sharedAccents);
+    accentEngine.beginPhraseDrag ("bass");
+    accentEngine.moveDraggedPhrase ("bass", { 0.30, 0.50 });
+    accentEngine.beginPhraseDrag ("chords");
+    accentEngine.moveDraggedPhrase ("chords", { 0.38, 0.50 });
+    for (auto step = 0; step < 120; ++step)
+    {
+        accentClock.advance (drift::engine::SpatialWorld::fixedStepSeconds);
+        accentEngine.tick();
+    }
+    auto accentSnapshot = accentEngine.snapshot();
+    expect (accentSnapshot.proximityMode
+                == drift::engine::ProximityAuditionMode::rhythmProfiles
+                && accentSnapshot.pendingProximityMode
+                       == drift::engine::ProximityAuditionMode::sharedAccents
+                && accentSnapshot.pendingProximityModeApplyBeat == 4.0,
+            "Audition mode changes publish pending state at the same musical boundary");
+    advanceToBeat (accentClock, accentEngine, 4.1);
+    accentSnapshot = accentEngine.snapshot();
+    const auto accentedBass = std::count_if (
+        accentSink.messages().begin(), accentSink.messages().end(), [] (const auto& message) {
+            return message.type == drift::music::MidiMessageType::noteOn
+                   && message.channel == 1 && message.note == 36
+                   && message.velocity == 124
+                   && std::abs (message.beat - 4.0) < 1.0e-8;
+        });
+    expect (accentSnapshot.proximityMode
+                == drift::engine::ProximityAuditionMode::sharedAccents
+                && ! accentSnapshot.pendingProximityMode
+                && accentSnapshot.diagnostics.proximityModeAppliedCount == 1,
+            "Shared-accent mode becomes authoritative exactly at the pending bar");
+    expect (accentedBass == 1,
+            "Tight shared accents add exactly 24 velocity without changing the onset");
+    expect (accentSink.activeNoteCount() == 0
+                && accentSnapshot.diagnostics.lateMidiEventCount == 0,
+            "Both audition mappings retain paired, on-time MIDI output");
 }
 
 void testFourPhrasesShareOneTransport()
@@ -1631,6 +1876,10 @@ void testBridgeRejectsInvalidCommandsBeforeMutation()
         {},
         [] (const std::string& phraseId) { return phraseId == "bass"; },
         [&engine] (bool paused) { engine.setMotionPaused (paused); },
+        [&engine] (const std::string& mode) {
+            engine.setProximityAuditionMode (
+                *drift::engine::proximityAuditionModeForName (mode));
+        },
     };
 
     const auto playResult = drift::ui::dispatchCommandEnvelope (
@@ -1650,6 +1899,15 @@ void testBridgeRejectsInvalidCommandsBeforeMutation()
         handlers);
     expect (! engine.snapshot().motionPaused && engine.snapshot().playing,
             "A valid motion command resumes only the world");
+    const auto proximityModeResult = drift::ui::dispatchCommandEnvelope (
+        makeCommandEnvelope (
+            "ui-proximity", "proximity.setAuditionMode",
+            makeProximityModePayload (juce::var { "sharedAccents" })),
+        handlers);
+    expect (proximityModeResult.command.has_value()
+                && engine.snapshot().pendingProximityMode
+                       == drift::engine::ProximityAuditionMode::sharedAccents,
+            "A valid audition command queues the requested native proximity mode");
     const auto scheduledBeforeRejections = sink.messages();
 
     const auto expectRejected = [&] (juce::var command,
@@ -1674,6 +1932,12 @@ void testBridgeRejectsInvalidCommandsBeforeMutation()
             "ui-motion", "world.setMotionPaused", makeMotionPayload (juce::var { "yes" })),
         drift::ui::CommandRejectionCode::invalidPayload,
         "A non-boolean motion state is rejected");
+    expectRejected (
+        makeCommandEnvelope (
+            "ui-proximity-invalid", "proximity.setAuditionMode",
+            makeProximityModePayload (juce::var { "random" })),
+        drift::ui::CommandRejectionCode::invalidPayload,
+        "An unknown proximity audition mode is rejected");
     expectRejected (
         makeCommandEnvelope ("bad message id", "transport.stop", makeObject()),
         drift::ui::CommandRejectionCode::invalidMessageId,
@@ -1788,6 +2052,7 @@ void testBridgeReconnectPreservesNativePlayback()
         {},
         {},
         {},
+        {},
     };
 
     drift::ui::dispatchCommandEnvelope (
@@ -1842,6 +2107,7 @@ int main()
     testPhraseSchedulingAcrossLoopAndBar();
     testInitialCompositionIsAuthoritative();
     testSpeedActivityMappingAndSmoothing();
+    testProximityMappingAndTransformations();
     testCollisionVariantRulesAndCycle();
     testSpatialWorldFixedStepAndBoundaries();
     testSpatialWorldBoundsCatchUpWork();
@@ -1854,6 +2120,7 @@ int main()
     testEveryCollisionPairQueuesItsMappedTarget();
     testSimultaneousCollisionsUseStablePriority();
     testSpeedActivityQueuesQuantizedVariantsAndCollisionWins();
+    testProximityAuditionQuantizesWhileMotionIsFrozen();
     testFourPhrasesShareOneTransport();
     testMotionPauseDoesNotInterruptPlayback();
     testEngineIsIndependentOfUiUpdateTiming();

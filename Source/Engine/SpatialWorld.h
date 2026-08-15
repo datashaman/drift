@@ -67,6 +67,7 @@ public:
                                            const std::string& secondPhraseId) const;
 
     const std::vector<PhraseBody>& bodies() const noexcept;
+    const std::vector<std::vector<PhraseBody>>& stepBodySnapshots() const noexcept;
     const SpatialWorldDiagnostics& diagnostics() const noexcept;
     std::size_t revision() const noexcept;
 
@@ -95,6 +96,7 @@ private:
     SpatialWorldDiagnostics worldDiagnostics;
     std::map<std::string, PairState> collisionPairs;
     std::vector<CollisionContact> pendingCollisionBegins;
+    std::vector<std::vector<PhraseBody>> latestStepBodySnapshots;
 };
 
 std::vector<PhraseBody> makePhraseBodies (const std::vector<music::Phrase>& phrases);

@@ -212,6 +212,7 @@ Initial command set:
 | `phrase.move` | Set target position during a drag |
 | `phrase.dragEnd` | End direct manipulation without a throw |
 | `phrase.throw` | End manipulation with release velocity |
+| `proximity.setAuditionMode` | Queue the selected proximity experiment for the next bar |
 | `debug.setEnabled` | Enable or disable debug data publication |
 
 Example:
@@ -260,6 +261,20 @@ Positions and velocities use normalized world coordinates so UI size and display
       "bar": 12,
       "beat": 2.25
     },
+    "proximityMode": "rhythmProfiles",
+    "pendingProximityMode": null,
+    "pendingProximityModeApplyBeat": null,
+    "proximityPairs": [
+      {
+        "firstPhraseId": "bass",
+        "secondPhraseId": "chords",
+        "rawProximity": 0.72,
+        "smoothedProximity": 0.68,
+        "couplingLevel": "linked",
+        "pendingCouplingLevel": null,
+        "pendingApplyBeat": null
+      }
+    ],
     "phrases": [
       {
         "id": "bass",
@@ -372,6 +387,15 @@ Speed is normalized as velocity magnitude divided by `SpatialWorld::maximumThrow
 
 Observation is suspended while world motion is paused or the phrase is dragged: raw speed remains observable, but smoothing and the stable band do not advance. Observation resumes from the released native velocity. Only stable band changes emit intents, and accepted changes are quantized to the next eligible bar.
 
+Proximity is evaluated for all six unordered phrase pairs after every fixed physics step, including while motion is frozen or a phrase is being dragged. It measures surface gap rather than centre distance:
+
+```text
+surfaceGap = max(0, centreDistance - firstRadius - secondRadius)
+rawProximity = 1 - clamp(surfaceGap / 0.40, 0, 1)
+```
+
+Each pair is independently smoothed with the same deterministic 250 ms exponential time constant. Coupling begins loose and uses inclusive hysteresis: loose enters linked at `≥ 0.40`, linked returns to loose at `≤ 0.30`, linked enters tight at `≥ 0.75`, and tight returns to linked at `≤ 0.65`. Stable changes are queued for the next eligible unscheduled bar. A newer state for the same boundary coalesces the pending pair transition; a competing transition for a different already-pending boundary is suppressed.
+
 ### 9.3 MIDI scheduling pipeline
 
 For each scheduling window:
@@ -403,6 +427,13 @@ Initial mappings:
 - `CollisionVariantMapping`: a new contact requests the next compatible variant at the next bar.
 - `SpeedActivityMapping`: smoothed speed selects sparse, normal, or active material at the next bar.
 - `ProximityRhythmMapping`: pairwise proximity selects a rhythmic-coupling state at a configured quantization boundary.
+
+`ProximityRhythmMapping` is being auditioned in two modes. Both run after collision and speed have resolved the active `A`/`B`/`C` phrase material:
+
+- **Rhythm profiles:** a phrase takes the strongest coupling it has with any neighbour. Loose leaves authored onsets unchanged, linked snaps them to the nearest half beat, and tight snaps them to the nearest beat. Pitch, duration, and velocity are preserved; chord notes remain simultaneous, and exact duplicate pitch/onset results are coalesced.
+- **Shared accents:** timing and density remain unchanged. Exact onsets shared by a pair gain `+12` velocity when linked or `+24` when tight, clamped to MIDI velocity 127. When several neighbours qualify, the maximum boost wins rather than summing boosts.
+
+Changing audition mode is itself bar-quantized and does not stop transport or invalidate already-scheduled MIDI. The selector and pair relationship lines are evaluation instrumentation; neither candidate is yet the chosen production mapping.
 
 `CollisionVariantMapping` uses the six stable unordered pair rules below. The target advances through its authored variant order `A → B → C → A`.
 
@@ -533,6 +564,8 @@ The exact JUCE WebView bridge API and platform resource scheme must be validated
 - Boundary collisions preserve expected direction and bounded positions.
 - Contact tracking emits one collision per contact/cooldown cycle.
 - Proximity normalization and clamping are correct.
+- Proximity smoothing and loose/linked/tight hysteresis are deterministic at exact boundaries and under threshold jitter.
+- Rhythm-profile snapping, wrapping, chord simultaneity, duplicate coalescing, and shared-accent clamping are correct.
 - Mapping rules create expected intents.
 - Conflicting intents resolve deterministically.
 - Phrase loop enumeration produces correct events across bar and loop boundaries.
@@ -546,6 +579,7 @@ The exact JUCE WebView bridge API and platform resource scheme must be validated
 - Simulated WebView commands result in authoritative snapshots and events.
 - UI snapshot backpressure drops stale state without blocking the engine.
 - Ten simulated minutes maintain phase alignment across all phrases.
+- Ten simulated minutes exercise proximity transitions and mode changes with paired notes and zero late MIDI.
 
 ### 15.3 UI tests
 
@@ -575,6 +609,8 @@ The engine records bounded diagnostic counters rather than unbounded logs:
 - Physics catch-up steps and capped catch-up incidents.
 - Active contacts and collision cooldowns.
 - Pending and applied intents.
+- Raw, smoothed, stable, and pending state for all six proximity pairs.
+- Current/pending proximity audition mode and proximity transition/mode counters.
 - Current scheduling watermark.
 
 The React debug overlay reads these through snapshots or low-rate debug events.
