@@ -389,6 +389,19 @@ Initial mappings:
 - `SpeedActivityMapping`: smoothed speed selects sparse, normal, or active material at the next bar.
 - `ProximityRhythmMapping`: pairwise proximity selects a rhythmic-coupling state at a configured quantization boundary.
 
+`CollisionVariantMapping` uses the six stable unordered pair rules below. The target advances through its authored variant order `A → B → C → A`.
+
+| Ordered pair | Target phrase |
+| --- | --- |
+| `bass`, `chords` | `chords` |
+| `bass`, `drums` | `bass` |
+| `bass`, `melody` | `bass` |
+| `chords`, `drums` | `drums` |
+| `chords`, `melody` | `chords` |
+| `drums`, `melody` | `melody` |
+
+Contact begins are sorted lexicographically by their stable ordered phrase IDs before evaluation. A phrase accepts at most one pending variant transition; subsequent same-tick or pre-boundary contacts targeting that phrase are observed but do not replace the accepted intent. This makes simultaneous outcomes independent of physics-body iteration order and prevents contradictory pending state.
+
 If two mappings request incompatible changes for the same phrase and boundary, a deterministic policy resolves them. For the POC, explicit collision changes should take priority over continuous speed/proximity changes.
 
 ## 11. React and PixiJS design

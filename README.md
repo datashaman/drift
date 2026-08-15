@@ -44,7 +44,20 @@ Physics never emits arbitrary notes directly. A collision may request a pattern 
 - **Speed:** control how sparse or active a phrase is.
 - **Proximity:** increase rhythmic coupling between nearby phrases.
 
-The initial composition contains four synchronized phrases—drums, bass, chords, and melody—with manually authored variants that already work together musically.
+The initial composition contains four synchronized phrases—drums, bass, chords, and melody—with three manually authored variants per role that already work together musically. Variants cycle predictably `A → B → C → A`.
+
+Every collision pair has one explicit target:
+
+| Collision | Phrase advanced |
+| --- | --- |
+| Bass + chords | Chords |
+| Bass + drums | Bass |
+| Bass + melody | Bass |
+| Chords + drums | Drums |
+| Chords + melody | Chords |
+| Drums + melody | Melody |
+
+New contacts are resolved in the table's stable pair order. If simultaneous contacts target the same phrase, the first accepted request wins and that phrase keeps one unambiguous pending transition until the next eligible bar.
 
 ## Architecture
 
@@ -84,7 +97,7 @@ Drift is in the design and initial implementation phase. The first development b
 5. [Prove transport stability under simulated UI stress](https://github.com/datashaman/drift/issues/5)
 6. [Validate ten-minute playback through a real MIDI device](https://github.com/datashaman/drift/issues/6)
 
-The native shell now connects React Play, Stop, BPM, MIDI-output, and direct phrase-drag controls to a native-owned monotonic transport and a four-role composition: drums, bass, chords, and melody. Drift schedules every phrase from the same transport to its assigned MIDI channel and advances the phrase bodies in a bounded normalized world at a fixed 120 Hz. Validated pointer intent crosses a bounded, coalescing command queue; PixiJS follows the pointer optimistically and reconciles to latest-state native snapshots at 30 Hz. A bounded recent pointer sample window gives each release a native-owned throw velocity, while stationary releases settle and edge or corner throws reflect inside the field. A new drums-bass contact now queues the first explicit musical intent, displays `BASS A → B`, and applies the alternate authored bass phrase exactly once at the next eligible unscheduled bar. Physics and input pressure remain independent of musical time, and the interface exposes timing, collision, cooldown, transition, catch-up, queue, coalescing, rejection, and snapshot diagnostics.
+The native shell now connects React Play, Stop, BPM, MIDI-output, and direct phrase-drag controls to a native-owned monotonic transport and a four-role composition: drums, bass, chords, and melody. Drift schedules every phrase from the same transport to its assigned MIDI channel and advances the phrase bodies in a bounded normalized world at a fixed 120 Hz. Validated pointer intent crosses a bounded, coalescing command queue; PixiJS follows the pointer optimistically and reconciles to latest-state native snapshots at 30 Hz. A bounded recent pointer sample window gives each release a native-owned throw velocity, while stationary releases settle and edge or corner throws reflect inside the field. Every phrase now has three compatible authored variants, and every unique phrase collision queues a deterministic target phrase advance exactly once at the next eligible unscheduled bar. Physics and input pressure remain independent of musical time, and the interface exposes every phrase's current/pending variant plus all pair mappings, contacts, cooldowns, transition counts, timing, catch-up, queue, coalescing, rejection, and snapshot diagnostics.
 
 The native/UI bridge uses a validated protocol-versioned envelope. Invalid commands produce structured rejection events without mutating engine state, and every React load performs a fresh handshake that restores the current authoritative transport state without restarting playback.
 

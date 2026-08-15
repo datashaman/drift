@@ -34,12 +34,7 @@ function snapshot(sequence: number, dragged = false): WorldSnapshot {
     engineTimeMs: sequence * 33,
     transport: { playing: true, bpm: 120, bar: 1, beat: 1 },
     phrases: [{ ...bass, dragged }],
-    collision: {
-      firstPhraseId: 'bass',
-      secondPhraseId: 'drums',
-      touching: false,
-      cooldownRemainingMs: 0,
-    },
+    collisions: [],
     diagnostics: {
       physicsStepCount: 0,
       physicsCatchUpStepCount: 0,

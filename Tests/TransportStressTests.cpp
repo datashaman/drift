@@ -189,24 +189,6 @@ bool messagesMatch (const std::vector<drift::music::ScheduledMidiMessage>& left,
     return true;
 }
 
-bool messagesMatchExceptChannel (
-    const std::vector<drift::music::ScheduledMidiMessage>& left,
-    const std::vector<drift::music::ScheduledMidiMessage>& right,
-    int excludedChannel)
-{
-    std::vector<drift::music::ScheduledMidiMessage> filteredLeft;
-    std::vector<drift::music::ScheduledMidiMessage> filteredRight;
-    std::copy_if (left.begin(), left.end(), std::back_inserter (filteredLeft),
-                  [excludedChannel] (const auto& message) {
-                      return message.channel != excludedChannel;
-                  });
-    std::copy_if (right.begin(), right.end(), std::back_inserter (filteredRight),
-                  [excludedChannel] (const auto& message) {
-                      return message.channel != excludedChannel;
-                  });
-    return messagesMatch (filteredLeft, filteredRight);
-}
-
 bool hasPairedNotes (const std::vector<drift::music::ScheduledMidiMessage>& messages)
 {
     std::array<std::array<int, 128>, 16> noteBalances {};
@@ -258,8 +240,8 @@ bool hasUniqueLoopBoundaries (const std::vector<drift::music::ScheduledMidiMessa
 
 int main()
 {
-    const auto baseline = runSimulation (false);
     const auto stressed = runSimulation (true);
+    const auto repeatedStress = runSimulation (true);
     std::vector<std::string> failures;
     const auto tolerance = drift::engine::TransportEngine::timingToleranceSeconds;
 
@@ -275,8 +257,8 @@ int main()
              "phase drift accumulated during the run");
     require (stressed.maximumTimestampErrorSeconds <= tolerance,
              "recorded MIDI timestamp exceeded tolerance");
-    require (messagesMatchExceptChannel (baseline.messages, stressed.messages, 1),
-             "UI stress changed an unmapped channel or its timestamps");
+    require (messagesMatch (stressed.messages, repeatedStress.messages),
+             "identical collision stress produced different MIDI or timestamps");
     require (hasPairedNotes (stressed.messages), "an outbound note was unpaired");
     require (hasUniqueLoopBoundaries (
                  stressed.messages, stressed.snapshot.diagnostics.schedulingWatermarkBeat),

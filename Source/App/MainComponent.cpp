@@ -319,16 +319,22 @@ void MainComponent::publishWorldSnapshot (const drift::engine::ControllerSnapsho
 
     payload->setProperty ("phrases", juce::var { phrases });
 
-    auto* collision = new juce::DynamicObject();
-    collision->setProperty (
-        "firstPhraseId", juce::String { state.transport.collision.firstPhraseId });
-    collision->setProperty (
-        "secondPhraseId", juce::String { state.transport.collision.secondPhraseId });
-    collision->setProperty ("touching", state.transport.collision.touching);
-    collision->setProperty (
-        "cooldownRemainingMs",
-        state.transport.collision.cooldownRemainingSeconds * 1000.0);
-    payload->setProperty ("collision", juce::var { collision });
+    juce::Array<juce::var> collisions;
+    for (const auto& collision : state.transport.collisions)
+    {
+        auto* collisionObject = new juce::DynamicObject();
+        collisionObject->setProperty (
+            "firstPhraseId", juce::String { collision.firstPhraseId });
+        collisionObject->setProperty (
+            "secondPhraseId", juce::String { collision.secondPhraseId });
+        collisionObject->setProperty (
+            "targetPhraseId", juce::String { collision.targetPhraseId });
+        collisionObject->setProperty ("touching", collision.touching);
+        collisionObject->setProperty (
+            "cooldownRemainingMs", collision.cooldownRemainingSeconds * 1000.0);
+        collisions.add (juce::var { collisionObject });
+    }
+    payload->setProperty ("collisions", juce::var { collisions });
 
     auto* diagnostics = new juce::DynamicObject();
     diagnostics->setProperty (

@@ -1,5 +1,6 @@
 #include "Engine/TransportEngine.h"
 
+#include "Engine/CollisionVariantMapping.h"
 #include "Music/Quantizer.h"
 
 #include <algorithm>
@@ -154,22 +155,31 @@ void TransportEngine::tick()
 
 void TransportEngine::processCollisionContacts (double currentBeat)
 {
-    for (const auto& contact : world.consumeCollisionBegins())
+    auto contacts = world.consumeCollisionBegins();
+    std::sort (contacts.begin(), contacts.end(), collisionContactLess);
+
+    for (const auto& contact : contacts)
     {
-        if (contact.firstPhraseId != "bass" || contact.secondPhraseId != "drums")
+        const auto* rule = findCollisionVariantRule (
+            contact.firstPhraseId, contact.secondPhraseId);
+        if (rule == nullptr)
             continue;
 
         ++diagnostics.collisionContactBeginCount;
-        const auto* bass = findPhrase ("bass");
-        if (bass == nullptr || bass->currentVariantId == "B" || bass->pendingVariantId)
+        const auto* target = findPhrase (rule->targetPhraseId);
+        if (target == nullptr || target->pendingVariantId)
+            continue;
+
+        const auto variantId = nextVariantId (*target);
+        if (! variantId)
             continue;
 
         const auto earliestUnscheduledBeat = std::max (currentBeat, scheduledThroughBeat)
                                              + timingToleranceSeconds;
         const MusicalIntent intent {
-            "bass",
+            rule->targetPhraseId,
             MusicalIntentType::changeVariant,
-            "B",
+            *variantId,
             music::quantizeForward (earliestUnscheduledBeat, barLengthBeats),
         };
         if (queueIntent (intent))
@@ -319,7 +329,20 @@ EngineSnapshot TransportEngine::snapshot() const
     snapshotDiagnostics.physicsCatchUpStepCount = worldDiagnostics.physicsCatchUpStepCount;
     snapshotDiagnostics.physicsCatchUpLimitHitCount
         = worldDiagnostics.physicsCatchUpLimitHitCount;
-    const auto collisionState = world.collisionPairState ("bass", "drums");
+    std::vector<CollisionSnapshot> collisionSnapshots;
+    collisionSnapshots.reserve (collisionVariantRules().size());
+    for (const auto& rule : collisionVariantRules())
+    {
+        const auto collisionState = world.collisionPairState (
+            rule.firstPhraseId, rule.secondPhraseId);
+        collisionSnapshots.push_back ({
+            rule.firstPhraseId,
+            rule.secondPhraseId,
+            rule.targetPhraseId,
+            collisionState.touching,
+            collisionState.cooldownRemainingSeconds,
+        });
+    }
 
     return {
         state.playing,
@@ -331,12 +354,7 @@ EngineSnapshot TransportEngine::snapshot() const
         world.revision(),
         sink.messageCount(),
         std::move (phraseSnapshots),
-        {
-            "bass",
-            "drums",
-            collisionState.touching,
-            collisionState.cooldownRemainingSeconds,
-        },
+        std::move (collisionSnapshots),
         snapshotDiagnostics,
     };
 }

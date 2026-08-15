@@ -65,12 +65,14 @@ function worldEvent(
         rejectedCommandCount: 1,
         commandPressureEventCount: 0,
       },
-      collision: {
-        firstPhraseId: 'bass',
-        secondPhraseId: 'drums',
-        touching: false,
-        cooldownRemainingMs: 0,
-      },
+      collisions: [
+        { firstPhraseId: 'bass', secondPhraseId: 'chords', targetPhraseId: 'chords', touching: false, cooldownRemainingMs: 0 },
+        { firstPhraseId: 'bass', secondPhraseId: 'drums', targetPhraseId: 'bass', touching: false, cooldownRemainingMs: 0 },
+        { firstPhraseId: 'bass', secondPhraseId: 'melody', targetPhraseId: 'bass', touching: false, cooldownRemainingMs: 0 },
+        { firstPhraseId: 'chords', secondPhraseId: 'drums', targetPhraseId: 'drums', touching: false, cooldownRemainingMs: 0 },
+        { firstPhraseId: 'chords', secondPhraseId: 'melody', targetPhraseId: 'chords', touching: false, cooldownRemainingMs: 0 },
+        { firstPhraseId: 'drums', secondPhraseId: 'melody', targetPhraseId: 'melody', touching: false, cooldownRemainingMs: 0 },
+      ],
       phrases: [
         {
           id: 'drums',
@@ -283,6 +285,11 @@ describe('Drift bridge interface', () => {
     invalidPending.payload.phrases[1].pendingVariantId = 'B'
     eventListener?.(invalidPending)
     expect(receivedWorldSequence).toBe(5)
+
+    const invalidCollision = worldEvent(9)
+    invalidCollision.payload.collisions[0].targetPhraseId = 'unknown'
+    eventListener?.(invalidCollision)
+    expect(receivedWorldSequence).toBe(5)
   })
 
   it('renders four phrases from the latest authoritative world snapshot', () => {
@@ -301,6 +308,10 @@ describe('Drift bridge interface', () => {
     expect(container.textContent).toContain('112 snapshots')
     expect(container.textContent).toContain('34.2 ms')
     expect(container.textContent).toContain('2 contacts / 1 queued / 0 applied')
+    expect(container.textContent).toContain('bass + chords')
+    expect(container.textContent).toContain('→ chords / clear / 0 ms')
+    expect(container.textContent).toContain('drums + melody')
+    expect(container.textContent).toContain('→ melody / clear / 0 ms')
 
     const pendingWorld = worldEvent(5)
     pendingWorld.payload.phrases[1].pendingVariantId = 'B'

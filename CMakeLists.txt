@@ -54,6 +54,8 @@ add_custom_command(
 add_custom_target(DriftUIBundle DEPENDS ${DRIFT_UI_OUTPUTS})
 
 add_library(DriftEngine STATIC
+    Source/Engine/CollisionVariantMapping.cpp
+    Source/Engine/CollisionVariantMapping.h
     Source/Engine/Clock.cpp
     Source/Engine/Clock.h
     Source/Engine/EngineCommandQueue.cpp

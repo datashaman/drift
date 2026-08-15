@@ -25,12 +25,7 @@ function snapshot(sequence: number, x: number, y: number): WorldSnapshot {
         playing: true,
       },
     ],
-    collision: {
-      firstPhraseId: 'bass',
-      secondPhraseId: 'drums',
-      touching: false,
-      cooldownRemainingMs: 0,
-    },
+    collisions: [],
     diagnostics: {
       physicsStepCount: sequence * 4,
       physicsCatchUpStepCount: 0,
