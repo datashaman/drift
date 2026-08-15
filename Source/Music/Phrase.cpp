@@ -1,5 +1,6 @@
 #include "Music/Phrase.h"
 
+#include <algorithm>
 #include <utility>
 
 namespace drift::music
@@ -15,7 +16,7 @@ Phrase makePhrase (std::string id,
                    double mass,
                    std::vector<NoteEvent> events)
 {
-    return {
+    Phrase phrase {
         std::move (id),
         4.0,
         midiChannel,
@@ -27,7 +28,12 @@ Phrase makePhrase (std::string id,
         velocity,
         0.045,
         mass,
+        {},
+        std::nullopt,
+        std::nullopt,
     };
+    phrase.variants.push_back ({ "A", phrase.events, 0.5 });
+    return phrase;
 }
 } // namespace
 
@@ -42,6 +48,29 @@ const char* phraseRoleName (PhraseRole role) noexcept
     }
 
     return "bass";
+}
+
+const PhraseVariant* findVariant (const Phrase& phrase,
+                                  const std::string& variantId) noexcept
+{
+    const auto variant = std::find_if (
+        phrase.variants.begin(), phrase.variants.end(), [&variantId] (const auto& candidate) {
+            return candidate.id == variantId;
+        });
+    return variant == phrase.variants.end() ? nullptr : &*variant;
+}
+
+bool applyVariant (Phrase& phrase, const std::string& variantId)
+{
+    const auto* variant = findVariant (phrase, variantId);
+    if (variant == nullptr)
+        return false;
+
+    phrase.currentVariantId = variant->id;
+    phrase.events = variant->events;
+    phrase.pendingVariantId.reset();
+    phrase.pendingVariantApplyBeat.reset();
+    return true;
 }
 
 std::vector<Phrase> makeInitialComposition()
@@ -83,6 +112,18 @@ std::vector<Phrase> makeInitialComposition()
             { 2.0, 31, 96, 0.75 },
             { 3.0, 34, 92, 0.5 },
         }));
+    phrases.back().variants.push_back ({
+        "B",
+        {
+            { 0.0, 36, 102, 0.5 },
+            { 0.75, 31, 86, 0.25 },
+            { 1.5, 34, 94, 0.4 },
+            { 2.0, 36, 98, 0.5 },
+            { 2.75, 39, 88, 0.25 },
+            { 3.5, 31, 92, 0.35 },
+        },
+        0.68,
+    });
     phrases.push_back (makePhrase (
         "chords",
         "CHORDS",

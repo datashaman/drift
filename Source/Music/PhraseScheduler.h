@@ -12,5 +12,10 @@ public:
                         double startBeat,
                         double endBeat,
                         MidiSink& sink) const;
+    void scheduleRange (const Phrase& phrase,
+                        const std::vector<NoteEvent>& events,
+                        double startBeat,
+                        double endBeat,
+                        MidiSink& sink) const;
 };
 } // namespace drift::music

@@ -17,6 +17,7 @@
 #include <limits>
 #include <memory>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -313,6 +314,9 @@ void testPhraseSchedulingAcrossLoopAndBar()
         { 0.0, 0.0 },
         0.045,
         1.0,
+        {},
+        std::nullopt,
+        std::nullopt,
     };
     drift::music::RecordingMidiSink sink;
     drift::music::PhraseScheduler scheduler;
@@ -356,6 +360,10 @@ void testInitialCompositionIsAuthoritative()
         expect (phrase.midiChannel == expectedChannels[index],
                 "Every role uses its required MIDI channel");
         expect (phrase.currentVariantId == "A", "Every phrase begins on authored variant A");
+        expect (! phrase.pendingVariantId && ! phrase.pendingVariantApplyBeat,
+                "Every phrase begins without a pending variant transition");
+        expect (drift::music::findVariant (phrase, "A") != nullptr,
+                "Every phrase exposes authored variant A");
         expect (phrase.lengthBeats == 4.0, "All initial phrases share a four-beat loop");
         expect (! phrase.events.empty(), "Every initial phrase contains authored notes");
         expect (phrase.position.x >= 0.0 && phrase.position.x <= 1.0
@@ -370,6 +378,9 @@ void testInitialCompositionIsAuthoritative()
     }
 
     expect (uniqueIds.size() == phrases.size(), "Phrase IDs are unique");
+    const auto& bass = phrases[1];
+    expect (drift::music::findVariant (bass, "B") != nullptr,
+            "The collision tracer bullet includes authored bass variant B");
 }
 
 void testSpatialWorldFixedStepAndBoundaries()
@@ -546,6 +557,63 @@ void testSpatialWorldThrowLifecycle()
             "A rejected throw does not interrupt the active drag");
 }
 
+void testSpatialWorldCollisionContactLifecycle()
+{
+    using drift::engine::PhraseBody;
+    using drift::engine::SpatialWorld;
+
+    SpatialWorld world {
+        {
+            PhraseBody { "bass", { 0.2, 0.5 }, {}, 0.05, 1.0 },
+            PhraseBody { "drums", { 0.8, 0.5 }, {}, 0.05, 1.0 },
+        },
+        0.0,
+    };
+    expect (world.beginDrag ("drums"), "The collision fixture can manipulate drums");
+    world.moveDraggedPhrase ("drums", { 0.25, 0.5 });
+    world.advanceTo (SpatialWorld::fixedStepSeconds);
+
+    const auto firstContacts = world.consumeCollisionBegins();
+    expect (firstContacts.size() == 1,
+            "A new overlap emits one collision contact-begin event");
+    expect (firstContacts.size() == 1
+                && firstContacts.front().firstPhraseId == "bass"
+                && firstContacts.front().secondPhraseId == "drums",
+            "Collision pair IDs have deterministic ordering");
+    expect (world.collisionPairState ("drums", "bass").touching,
+            "The authoritative pair state exposes sustained contact");
+
+    world.advanceTo (2.0 * SpatialWorld::fixedStepSeconds);
+    expect (world.consumeCollisionBegins().empty(),
+            "Sustained overlap cannot emit another contact begin");
+
+    world.moveDraggedPhrase ("drums", { 0.8, 0.5 });
+    world.advanceTo (3.0 * SpatialWorld::fixedStepSeconds);
+    expect (! world.collisionPairState ("bass", "drums").touching,
+            "Separation ends authoritative pair contact");
+    world.moveDraggedPhrase ("drums", { 0.25, 0.5 });
+    world.advanceTo (4.0 * SpatialWorld::fixedStepSeconds);
+    expect (world.consumeCollisionBegins().empty(),
+            "Re-contact during cooldown is suppressed");
+
+    world.moveDraggedPhrase ("drums", { 0.8, 0.5 });
+    auto now = 4.0 * SpatialWorld::fixedStepSeconds;
+    const auto cooldownSteps = static_cast<int> (
+        std::ceil (SpatialWorld::collisionCooldownSeconds / SpatialWorld::fixedStepSeconds));
+    for (auto step = 0; step <= cooldownSteps; ++step)
+    {
+        now += SpatialWorld::fixedStepSeconds;
+        world.advanceTo (now);
+    }
+    world.moveDraggedPhrase ("drums", { 0.25, 0.5 });
+    now += SpatialWorld::fixedStepSeconds;
+    world.advanceTo (now);
+    expect (world.consumeCollisionBegins().size() == 1,
+            "Separation and re-contact after cooldown emits one new contact begin");
+    expect (world.diagnostics().collisionContactBeginCount == 2,
+            "Accepted collision contact begins are observable in diagnostics");
+}
+
 void testEngineCommandQueueCoalescingAndPressure()
 {
     using drift::engine::CommandEnqueueResult;
@@ -689,6 +757,119 @@ void testEngineCommandQueueCoalescingAndPressure()
                 EngineCommandType::phraseMove, "old-ui", "bass"))
                 == CommandEnqueueResult::staleDrag,
             "Reconnect invalidates movement from an abandoned pointer lifecycle");
+}
+
+void testCollisionQueuesAndAppliesBassVariantAtBar()
+{
+    const auto advanceToBeat = [] (FakeClock& clock,
+                                   drift::engine::TransportEngine& engine,
+                                   double targetBeat) {
+        while (engine.snapshot().beatPosition + 1.0e-9 < targetBeat)
+        {
+            const auto remainingBeats = targetBeat - engine.snapshot().beatPosition;
+            clock.advance (std::min (0.002, remainingBeats * 0.5));
+            engine.tick();
+        }
+    };
+    const auto phraseById = [] (const drift::engine::EngineSnapshot& snapshot,
+                                const std::string& phraseId) -> const drift::engine::PhraseSnapshot& {
+        const auto phrase = std::find_if (
+            snapshot.phrases.begin(), snapshot.phrases.end(), [&phraseId] (const auto& candidate) {
+                return candidate.id == phraseId;
+            });
+        if (phrase == snapshot.phrases.end())
+            throw std::runtime_error ("Missing phrase snapshot");
+        return *phrase;
+    };
+
+    FakeClock clock;
+    drift::music::RecordingMidiSink sink;
+    drift::engine::TransportEngine engine { clock, sink };
+    engine.play();
+    expect (engine.beginPhraseDrag ("drums"),
+            "The collision transition fixture can hold the drums phrase");
+    advanceToBeat (clock, engine, 0.5);
+    const auto bassPosition = phraseById (engine.snapshot(), "bass").position;
+    engine.moveDraggedPhrase ("drums", bassPosition);
+    clock.advance (drift::engine::SpatialWorld::fixedStepSeconds);
+    engine.tick();
+
+    auto state = engine.snapshot();
+    auto bass = phraseById (state, "bass");
+    expect (bass.currentVariantId == "A",
+            "A collision leaves the current bass variant active before quantization");
+    expect (bass.pendingVariantId && *bass.pendingVariantId == "B",
+            "A drums-bass contact queues deterministic bass variant B");
+    expect (bass.pendingVariantApplyBeat.has_value(),
+            "The pending transition publishes its authoritative beat");
+    if (bass.pendingVariantApplyBeat)
+        expectNear (*bass.pendingVariantApplyBeat, 4.0,
+                    "An early collision targets the next unscheduled bar");
+    expect (state.diagnostics.collisionContactBeginCount == 1
+                && state.diagnostics.collisionIntentQueuedCount == 1
+                && state.diagnostics.collisionTransitionAppliedCount == 0,
+            "Contact and queued intent are observable before application");
+    expect (std::none_of (
+                sink.messages().begin(), sink.messages().end(), [] (const auto& message) {
+                    return message.type == drift::music::MidiMessageType::noteOn
+                           && message.channel == 1 && message.note == 31
+                           && std::abs (message.beat - 0.75) < 1.0e-8;
+                }),
+            "A collision never emits variant B notes immediately or unquantized");
+
+    advanceToBeat (clock, engine, 3.999);
+    bass = phraseById (engine.snapshot(), "bass");
+    expect (bass.currentVariantId == "A" && bass.pendingVariantId,
+            "The transition remains pending immediately before the bar");
+
+    advanceToBeat (clock, engine, 4.0);
+    state = engine.snapshot();
+    bass = phraseById (state, "bass");
+    expect (bass.currentVariantId == "B" && ! bass.pendingVariantId
+                && ! bass.pendingVariantApplyBeat,
+            "The pending variant applies and clears exactly on the bar");
+    expect (state.diagnostics.collisionTransitionAppliedCount == 1,
+            "Exactly one applied transition is observable");
+
+    advanceToBeat (clock, engine, 4.6);
+    const auto variantBNoteCount = std::count_if (
+        sink.messages().begin(), sink.messages().end(), [] (const auto& message) {
+            return message.type == drift::music::MidiMessageType::noteOn
+                   && message.channel == 1 && message.note == 31
+                   && std::abs (message.beat - 4.75) < 1.0e-8;
+        });
+    expect (variantBNoteCount == 1,
+            "Variant B schedules its distinguishing post-boundary note exactly once");
+    expect (sink.activeNoteCount() == 0,
+            "The quantized variant transition preserves paired note-on and note-off output");
+    expect (state.diagnostics.lateMidiEventCount == 0,
+            "The collision transition introduces no late MIDI events");
+
+    const auto pendingBeatForCollisionAt = [&advanceToBeat, &phraseById] (
+        double collisionBeat) -> double {
+        FakeClock localClock;
+        drift::music::RecordingMidiSink localSink;
+        drift::engine::TransportEngine localEngine { localClock, localSink };
+        localEngine.play();
+        localEngine.beginPhraseDrag ("drums");
+        advanceToBeat (localClock, localEngine, collisionBeat);
+        const auto position = phraseById (localEngine.snapshot(), "bass").position;
+        localEngine.moveDraggedPhrase ("drums", position);
+        localClock.advance (drift::engine::SpatialWorld::fixedStepSeconds);
+        localEngine.tick();
+        const auto pending = phraseById (localEngine.snapshot(), "bass")
+                                 .pendingVariantApplyBeat;
+        return pending.value_or (-1.0);
+    };
+
+    expectNear (pendingBeatForCollisionAt (3.7), 4.0,
+                "A collision before the look-ahead reaches the bar can apply at that bar");
+    expectNear (pendingBeatForCollisionAt (3.99), 8.0,
+                "A collision immediately before an already-scheduled bar targets the next one");
+    expectNear (pendingBeatForCollisionAt (4.0), 8.0,
+                "A collision on an already-scheduled bar targets the next one");
+    expectNear (pendingBeatForCollisionAt (4.01), 8.0,
+                "A collision immediately after a bar targets the following bar");
 }
 
 void testFourPhrasesShareOneTransport()
@@ -1138,7 +1319,9 @@ int main()
     testSpatialWorldBoundsCatchUpWork();
     testSpatialWorldDragLifecycle();
     testSpatialWorldThrowLifecycle();
+    testSpatialWorldCollisionContactLifecycle();
     testEngineCommandQueueCoalescingAndPressure();
+    testCollisionQueuesAndAppliesBassVariantAtBar();
     testFourPhrasesShareOneTransport();
     testEngineIsIndependentOfUiUpdateTiming();
     testMidiOutputSelectionAndReplacement();

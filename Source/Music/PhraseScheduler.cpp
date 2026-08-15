@@ -12,6 +12,15 @@ void PhraseScheduler::scheduleRange (const Phrase& phrase,
                                      double endBeat,
                                      MidiSink& sink) const
 {
+    scheduleRange (phrase, phrase.events, startBeat, endBeat, sink);
+}
+
+void PhraseScheduler::scheduleRange (const Phrase& phrase,
+                                     const std::vector<NoteEvent>& events,
+                                     double startBeat,
+                                     double endBeat,
+                                     MidiSink& sink) const
+{
     if (phrase.lengthBeats <= 0.0)
         throw std::invalid_argument ("Phrase length must be positive");
 
@@ -27,7 +36,7 @@ void PhraseScheduler::scheduleRange (const Phrase& phrase,
     {
         const auto loopStart = static_cast<double> (loop) * phrase.lengthBeats;
 
-        for (const auto& event : phrase.events)
+        for (const auto& event : events)
         {
             const auto noteBeat = loopStart + event.beat;
 

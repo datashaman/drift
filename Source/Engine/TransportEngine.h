@@ -8,6 +8,7 @@
 #include "Music/Transport.h"
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -22,6 +23,9 @@ struct EngineDiagnostics
     std::size_t physicsStepCount = 0;
     std::size_t physicsCatchUpStepCount = 0;
     std::size_t physicsCatchUpLimitHitCount = 0;
+    std::size_t collisionContactBeginCount = 0;
+    std::size_t collisionIntentQueuedCount = 0;
+    std::size_t collisionTransitionAppliedCount = 0;
 };
 
 struct PhraseSnapshot
@@ -30,6 +34,8 @@ struct PhraseSnapshot
     std::string name;
     music::PhraseRole role = music::PhraseRole::bass;
     std::string currentVariantId;
+    std::optional<std::string> pendingVariantId;
+    std::optional<double> pendingVariantApplyBeat;
     int midiChannel = 1;
     music::NormalizedPosition position;
     music::NormalizedVelocity velocity;
@@ -37,6 +43,14 @@ struct PhraseSnapshot
     double mass = 1.0;
     bool dragged = false;
     bool playing = false;
+};
+
+struct CollisionSnapshot
+{
+    std::string firstPhraseId = "bass";
+    std::string secondPhraseId = "drums";
+    bool touching = false;
+    double cooldownRemainingSeconds = 0.0;
 };
 
 struct EngineSnapshot
@@ -50,7 +64,21 @@ struct EngineSnapshot
     std::size_t worldRevision = 0;
     std::size_t scheduledEventCount = 0;
     std::vector<PhraseSnapshot> phrases;
+    CollisionSnapshot collision;
     EngineDiagnostics diagnostics;
+};
+
+enum class MusicalIntentType
+{
+    changeVariant,
+};
+
+struct MusicalIntent
+{
+    std::string phraseId;
+    MusicalIntentType type = MusicalIntentType::changeVariant;
+    std::string variantId;
+    double applyAtBeat = 0.0;
 };
 
 class TransportEngine
@@ -79,6 +107,16 @@ public:
 
 private:
     static constexpr double lookAheadSeconds = 0.1;
+    static constexpr double barLengthBeats = 4.0;
+
+    void processCollisionContacts (double currentBeat);
+    bool queueIntent (const MusicalIntent& intent);
+    void applyDueIntents (double currentBeat);
+    void schedulePhraseRange (const music::Phrase& phrase,
+                              double startBeat,
+                              double endBeat,
+                              music::MidiSink& targetSink) const;
+    music::Phrase* findPhrase (const std::string& phraseId) noexcept;
 
     music::MidiSink& sink;
     Clock& clock;

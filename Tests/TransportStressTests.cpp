@@ -8,6 +8,7 @@
 #include <cmath>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <set>
 #include <string>
 #include <utility>
@@ -188,6 +189,24 @@ bool messagesMatch (const std::vector<drift::music::ScheduledMidiMessage>& left,
     return true;
 }
 
+bool messagesMatchExceptChannel (
+    const std::vector<drift::music::ScheduledMidiMessage>& left,
+    const std::vector<drift::music::ScheduledMidiMessage>& right,
+    int excludedChannel)
+{
+    std::vector<drift::music::ScheduledMidiMessage> filteredLeft;
+    std::vector<drift::music::ScheduledMidiMessage> filteredRight;
+    std::copy_if (left.begin(), left.end(), std::back_inserter (filteredLeft),
+                  [excludedChannel] (const auto& message) {
+                      return message.channel != excludedChannel;
+                  });
+    std::copy_if (right.begin(), right.end(), std::back_inserter (filteredRight),
+                  [excludedChannel] (const auto& message) {
+                      return message.channel != excludedChannel;
+                  });
+    return messagesMatch (filteredLeft, filteredRight);
+}
+
 bool hasPairedNotes (const std::vector<drift::music::ScheduledMidiMessage>& messages)
 {
     std::array<std::array<int, 128>, 16> noteBalances {};
@@ -256,8 +275,8 @@ int main()
              "phase drift accumulated during the run");
     require (stressed.maximumTimestampErrorSeconds <= tolerance,
              "recorded MIDI timestamp exceeded tolerance");
-    require (messagesMatch (baseline.messages, stressed.messages),
-             "UI stress changed scheduled messages or timestamps");
+    require (messagesMatchExceptChannel (baseline.messages, stressed.messages, 1),
+             "UI stress changed an unmapped channel or its timestamps");
     require (hasPairedNotes (stressed.messages), "an outbound note was unpaired");
     require (hasUniqueLoopBoundaries (
                  stressed.messages, stressed.snapshot.diagnostics.schedulingWatermarkBeat),
@@ -288,6 +307,9 @@ int main()
              "the harness did not generate sustained drag pressure");
     require (stressed.throwCount >= 95,
              "the harness did not rapidly throw all four phrases");
+    require (stressed.snapshot.diagnostics.collisionIntentQueuedCount >= 1
+                 && stressed.snapshot.diagnostics.collisionTransitionAppliedCount >= 1,
+             "the stress run did not exercise the collision transition path");
 
     std::cout << std::fixed << std::setprecision (9)
               << "Drift deterministic timing stress report\n"
@@ -305,6 +327,12 @@ int main()
               << stressed.snapshot.diagnostics.physicsCatchUpStepCount << '\n'
               << "Physics catch-up caps: "
               << stressed.snapshot.diagnostics.physicsCatchUpLimitHitCount << '\n'
+              << "Collision contacts: "
+              << stressed.snapshot.diagnostics.collisionContactBeginCount << '\n'
+              << "Collision intents queued: "
+              << stressed.snapshot.diagnostics.collisionIntentQueuedCount << '\n'
+              << "Collision transitions applied: "
+              << stressed.snapshot.diagnostics.collisionTransitionAppliedCount << '\n'
               << "Recorded MIDI messages: " << stressed.messages.size() << '\n'
               << "Scheduling watermark: "
               << stressed.snapshot.diagnostics.schedulingWatermarkBeat << " beats\n"

@@ -234,6 +234,21 @@ export function App({ bridge }: AppProps) {
             <dd>{worldSnapshot.diagnostics.physicsStepCount} steps</dd>
           </div>
           <div>
+            <dt>Collision</dt>
+            <dd>
+              {worldSnapshot.collision.touching ? 'contact' : 'clear'} /{' '}
+              {worldSnapshot.collision.cooldownRemainingMs.toFixed(0)} ms
+            </dd>
+          </div>
+          <div>
+            <dt>Transitions</dt>
+            <dd>
+              {worldSnapshot.diagnostics.collisionContactBeginCount} contacts /{' '}
+              {worldSnapshot.diagnostics.collisionIntentQueuedCount} queued /{' '}
+              {worldSnapshot.diagnostics.collisionTransitionAppliedCount} applied
+            </dd>
+          </div>
+          <div>
             <dt>Catch-up</dt>
             <dd>
               {worldSnapshot.diagnostics.physicsCatchUpStepCount} / {worldSnapshot.diagnostics.physicsCatchUpLimitHitCount} caps

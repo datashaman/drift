@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,13 @@ struct NoteEvent
     double durationBeats = 0.5;
 };
 
+struct PhraseVariant
+{
+    std::string id;
+    std::vector<NoteEvent> events;
+    double activity = 0.5;
+};
+
 struct Phrase
 {
     std::string id;
@@ -46,8 +54,14 @@ struct Phrase
     NormalizedVelocity velocity;
     double radius = 0.045;
     double mass = 1.0;
+    std::vector<PhraseVariant> variants;
+    std::optional<std::string> pendingVariantId;
+    std::optional<double> pendingVariantApplyBeat;
 };
 
 const char* phraseRoleName (PhraseRole role) noexcept;
+const PhraseVariant* findVariant (const Phrase& phrase,
+                                  const std::string& variantId) noexcept;
+bool applyVariant (Phrase& phrase, const std::string& variantId);
 std::vector<Phrase> makeInitialComposition();
 } // namespace drift::music

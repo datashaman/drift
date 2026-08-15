@@ -73,6 +73,12 @@ function colourForPhrase(phrase: PhraseSnapshot) {
   return phraseColours[phrase.id] ?? 0xeef1e8
 }
 
+function variantLabel(phrase: PhraseSnapshot) {
+  return phrase.pendingVariantId
+    ? `${phrase.currentVariantId} → ${phrase.pendingVariantId}`
+    : phrase.currentVariantId
+}
+
 export function PhraseWorld({
   snapshot,
   onDragStart,
@@ -171,7 +177,7 @@ export function PhraseWorld({
           .circle(0, 0, 1)
           .stroke({ color: 0xeef1e8, width: 0.1, alpha: 0.82 })
         const label = new Text({
-          text: `${phrase.name} · ${phrase.currentVariantId}`,
+          text: `${phrase.name} · ${variantLabel(phrase)}`,
           style: {
             fill: colour,
             fontFamily: 'SFMono-Regular, Consolas, monospace',
@@ -219,7 +225,7 @@ export function PhraseWorld({
           node.selection.visible = phrase.dragged || isOptimisticallyDragged
           node.selection.scale.set(radiusPixels * 1.28)
           node.label.position.set(radiusPixels + 10, -7)
-          node.label.text = `${phrase.name} · ${phrase.currentVariantId}`
+          node.label.text = `${phrase.name} · ${variantLabel(phrase)}`
         }
       }
 
@@ -333,7 +339,7 @@ export function PhraseWorld({
       <ul className="phrase-world-accessibility" aria-label="Phrase world">
         {snapshot.phrases.map((phrase) => (
           <li data-phrase-id={phrase.id} key={phrase.id}>
-            {phrase.name} · {phrase.currentVariantId} · {phrase.playing ? 'playing' : 'stopped'} · {phrase.dragged ? 'selected' : 'free'}
+            {phrase.name} · {variantLabel(phrase)} · {phrase.playing ? 'playing' : 'stopped'} · {phrase.dragged ? 'selected' : 'free'}
           </li>
         ))}
       </ul>
