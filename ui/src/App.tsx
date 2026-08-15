@@ -157,7 +157,7 @@ export function App({ bridge }: AppProps) {
           <label className="proximity-mode-control">
             <span>Proximity</span>
             <select
-              aria-label="Proximity audition mode"
+              aria-label="Proximity mode"
               disabled={!controlsReady}
               onChange={(event) =>
                 transportBridge.send(createCommand({
@@ -167,8 +167,8 @@ export function App({ bridge }: AppProps) {
               }
               value={proximityModeValue}
             >
-              <option value="rhythmProfiles">Rhythm profiles</option>
-              <option value="sharedAccents">Shared accents</option>
+              <option value="rhythmProfiles">Lock Rhythm</option>
+              <option value="sharedAccents">Accent Together</option>
             </select>
           </label>
         </div>
@@ -281,9 +281,9 @@ export function App({ bridge }: AppProps) {
           <div>
             <dt>Proximity mode</dt>
             <dd>
-              {worldSnapshot.proximityMode === 'rhythmProfiles' ? 'Rhythm profiles' : 'Shared accents'}
+              {worldSnapshot.proximityMode === 'rhythmProfiles' ? 'Lock Rhythm' : 'Accent Together'}
               {worldSnapshot.pendingProximityMode
-                ? ` → ${worldSnapshot.pendingProximityMode === 'rhythmProfiles' ? 'Rhythm profiles' : 'Shared accents'}`
+                ? ` → ${worldSnapshot.pendingProximityMode === 'rhythmProfiles' ? 'Lock Rhythm' : 'Accent Together'}`
                 : ''}
             </dd>
           </div>

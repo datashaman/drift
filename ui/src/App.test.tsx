@@ -282,7 +282,7 @@ describe('Drift bridge interface', () => {
     expect(screen.getByText('0.125 ms')).toBeTruthy()
     expect(screen.getByText('Moving')).toBeTruthy()
 
-    fireEvent.change(screen.getByLabelText('Proximity audition mode'), {
+    fireEvent.change(screen.getByLabelText('Proximity mode'), {
       target: { value: 'sharedAccents' },
     })
     expect(bridge.commands.at(-1)).toMatchObject({
@@ -408,7 +408,7 @@ describe('Drift bridge interface', () => {
     pendingProximity.payload.pendingProximityModeApplyBeat = 4
     act(() => bridge.publish(pendingProximity))
     expect(container.textContent).toContain('loose → linked')
-    expect(container.textContent).toContain('Rhythm profiles → Shared accents')
+    expect(container.textContent).toContain('Lock Rhythm → Accent Together')
 
     const pendingWorld = worldEvent(6)
     pendingWorld.payload.phrases[1].pendingVariantId = 'B'
