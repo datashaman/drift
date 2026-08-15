@@ -1,6 +1,9 @@
 #include "Engine/TransportEngine.h"
 
+#include "Music/Quantizer.h"
+
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace drift::engine
@@ -77,6 +80,11 @@ void TransportEngine::stop()
     transport.stop();
     scheduledThroughBeat = 0.0;
     sink.clear();
+    for (auto& phrase : phrases)
+    {
+        phrase.pendingVariantId.reset();
+        phrase.pendingVariantApplyBeat.reset();
+    }
 }
 
 bool TransportEngine::setBpm (double bpm)
@@ -111,6 +119,8 @@ void TransportEngine::tick()
 {
     world.advanceTo (clock.nowSeconds());
     const auto state = transport.snapshot();
+    processCollisionContacts (state.beatPosition);
+    applyDueIntents (state.beatPosition);
 
     if (! state.playing)
         return;
@@ -135,11 +145,112 @@ void TransportEngine::tick()
         diagnostics,
     };
     for (const auto& phrase : phrases)
-        scheduler.scheduleRange (phrase, rangeStart, horizonBeat, timingSink);
+        schedulePhraseRange (phrase, rangeStart, horizonBeat, timingSink);
 
     scheduledThroughBeat = horizonBeat;
     diagnostics.schedulingWatermarkBeat = std::max (
         diagnostics.schedulingWatermarkBeat, scheduledThroughBeat);
+}
+
+void TransportEngine::processCollisionContacts (double currentBeat)
+{
+    for (const auto& contact : world.consumeCollisionBegins())
+    {
+        if (contact.firstPhraseId != "bass" || contact.secondPhraseId != "drums")
+            continue;
+
+        ++diagnostics.collisionContactBeginCount;
+        const auto* bass = findPhrase ("bass");
+        if (bass == nullptr || bass->currentVariantId == "B" || bass->pendingVariantId)
+            continue;
+
+        const auto earliestUnscheduledBeat = std::max (currentBeat, scheduledThroughBeat)
+                                             + timingToleranceSeconds;
+        const MusicalIntent intent {
+            "bass",
+            MusicalIntentType::changeVariant,
+            "B",
+            music::quantizeForward (earliestUnscheduledBeat, barLengthBeats),
+        };
+        if (queueIntent (intent))
+            ++diagnostics.collisionIntentQueuedCount;
+    }
+}
+
+bool TransportEngine::queueIntent (const MusicalIntent& intent)
+{
+    if (intent.type != MusicalIntentType::changeVariant)
+        return false;
+
+    auto* phrase = findPhrase (intent.phraseId);
+    if (phrase == nullptr || phrase->pendingVariantId
+        || music::findVariant (*phrase, intent.variantId) == nullptr
+        || ! std::isfinite (intent.applyAtBeat) || intent.applyAtBeat < 0.0)
+    {
+        return false;
+    }
+
+    phrase->pendingVariantId = intent.variantId;
+    phrase->pendingVariantApplyBeat = intent.applyAtBeat;
+    return true;
+}
+
+void TransportEngine::applyDueIntents (double currentBeat)
+{
+    for (auto& phrase : phrases)
+    {
+        if (! phrase.pendingVariantId || ! phrase.pendingVariantApplyBeat
+            || currentBeat + timingToleranceSeconds < *phrase.pendingVariantApplyBeat)
+        {
+            continue;
+        }
+
+        const auto variantId = *phrase.pendingVariantId;
+        if (music::applyVariant (phrase, variantId))
+            ++diagnostics.collisionTransitionAppliedCount;
+    }
+}
+
+void TransportEngine::schedulePhraseRange (const music::Phrase& phrase,
+                                           double startBeat,
+                                           double endBeat,
+                                           music::MidiSink& targetSink) const
+{
+    if (! phrase.pendingVariantId || ! phrase.pendingVariantApplyBeat)
+    {
+        scheduler.scheduleRange (phrase, startBeat, endBeat, targetSink);
+        return;
+    }
+
+    const auto applyAtBeat = *phrase.pendingVariantApplyBeat;
+    if (startBeat < applyAtBeat)
+    {
+        scheduler.scheduleRange (
+            phrase, startBeat, std::min (endBeat, applyAtBeat), targetSink);
+    }
+
+    if (endBeat <= applyAtBeat)
+        return;
+
+    const auto* pendingVariant = music::findVariant (phrase, *phrase.pendingVariantId);
+    if (pendingVariant != nullptr)
+    {
+        scheduler.scheduleRange (
+            phrase,
+            pendingVariant->events,
+            std::max (startBeat, applyAtBeat),
+            endBeat,
+            targetSink);
+    }
+}
+
+music::Phrase* TransportEngine::findPhrase (const std::string& phraseId) noexcept
+{
+    const auto phrase = std::find_if (
+        phrases.begin(), phrases.end(), [&phraseId] (const auto& candidate) {
+            return candidate.id == phraseId;
+        });
+    return phrase == phrases.end() ? nullptr : &*phrase;
 }
 
 bool TransportEngine::beginPhraseDrag (const std::string& phraseId)
@@ -190,6 +301,8 @@ EngineSnapshot TransportEngine::snapshot() const
             phrase.name,
             phrase.role,
             phrase.currentVariantId,
+            phrase.pendingVariantId,
+            phrase.pendingVariantApplyBeat,
             phrase.midiChannel,
             body.position,
             body.velocity,
@@ -206,6 +319,7 @@ EngineSnapshot TransportEngine::snapshot() const
     snapshotDiagnostics.physicsCatchUpStepCount = worldDiagnostics.physicsCatchUpStepCount;
     snapshotDiagnostics.physicsCatchUpLimitHitCount
         = worldDiagnostics.physicsCatchUpLimitHitCount;
+    const auto collisionState = world.collisionPairState ("bass", "drums");
 
     return {
         state.playing,
@@ -217,6 +331,12 @@ EngineSnapshot TransportEngine::snapshot() const
         world.revision(),
         sink.messageCount(),
         std::move (phraseSnapshots),
+        {
+            "bass",
+            "drums",
+            collisionState.touching,
+            collisionState.cooldownRemainingSeconds,
+        },
         snapshotDiagnostics,
     };
 }

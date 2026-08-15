@@ -218,6 +218,16 @@ void MainComponent::publishState()
         "physicsCatchUpLimitHitCount",
         static_cast<juce::int64> (state.transport.diagnostics.physicsCatchUpLimitHitCount));
     diagnostics->setProperty (
+        "collisionContactBeginCount",
+        static_cast<juce::int64> (state.transport.diagnostics.collisionContactBeginCount));
+    diagnostics->setProperty (
+        "collisionIntentQueuedCount",
+        static_cast<juce::int64> (state.transport.diagnostics.collisionIntentQueuedCount));
+    diagnostics->setProperty (
+        "collisionTransitionAppliedCount",
+        static_cast<juce::int64> (
+            state.transport.diagnostics.collisionTransitionAppliedCount));
+    diagnostics->setProperty (
         "commandQueueDepth", static_cast<juce::int64> (state.commandQueue.queueDepth));
     diagnostics->setProperty (
         "maximumCommandQueueDepth",
@@ -279,6 +289,16 @@ void MainComponent::publishWorldSnapshot (const drift::engine::ControllerSnapsho
             "role", drift::music::phraseRoleName (phrase.role));
         phraseObject->setProperty (
             "currentVariantId", juce::String { phrase.currentVariantId });
+        phraseObject->setProperty (
+            "pendingVariantId",
+            phrase.pendingVariantId
+                ? juce::var { juce::String { *phrase.pendingVariantId } }
+                : juce::var {});
+        phraseObject->setProperty (
+            "pendingVariantApplyBeat",
+            phrase.pendingVariantApplyBeat
+                ? juce::var { *phrase.pendingVariantApplyBeat }
+                : juce::var {});
         phraseObject->setProperty ("midiChannel", phrase.midiChannel);
         phraseObject->setProperty ("playing", phrase.playing);
 
@@ -299,6 +319,17 @@ void MainComponent::publishWorldSnapshot (const drift::engine::ControllerSnapsho
 
     payload->setProperty ("phrases", juce::var { phrases });
 
+    auto* collision = new juce::DynamicObject();
+    collision->setProperty (
+        "firstPhraseId", juce::String { state.transport.collision.firstPhraseId });
+    collision->setProperty (
+        "secondPhraseId", juce::String { state.transport.collision.secondPhraseId });
+    collision->setProperty ("touching", state.transport.collision.touching);
+    collision->setProperty (
+        "cooldownRemainingMs",
+        state.transport.collision.cooldownRemainingSeconds * 1000.0);
+    payload->setProperty ("collision", juce::var { collision });
+
     auto* diagnostics = new juce::DynamicObject();
     diagnostics->setProperty (
         "physicsStepCount",
@@ -309,6 +340,16 @@ void MainComponent::publishWorldSnapshot (const drift::engine::ControllerSnapsho
     diagnostics->setProperty (
         "physicsCatchUpLimitHitCount",
         static_cast<juce::int64> (state.transport.diagnostics.physicsCatchUpLimitHitCount));
+    diagnostics->setProperty (
+        "collisionContactBeginCount",
+        static_cast<juce::int64> (state.transport.diagnostics.collisionContactBeginCount));
+    diagnostics->setProperty (
+        "collisionIntentQueuedCount",
+        static_cast<juce::int64> (state.transport.diagnostics.collisionIntentQueuedCount));
+    diagnostics->setProperty (
+        "collisionTransitionAppliedCount",
+        static_cast<juce::int64> (
+            state.transport.diagnostics.collisionTransitionAppliedCount));
     diagnostics->setProperty (
         "droppedSnapshotCount", static_cast<juce::int64> (droppedWorldSnapshotCount));
     diagnostics->setProperty (

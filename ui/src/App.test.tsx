@@ -54,6 +54,9 @@ function worldEvent(
         physicsStepCount: 150,
         physicsCatchUpStepCount: 3,
         physicsCatchUpLimitHitCount: 0,
+        collisionContactBeginCount: 2,
+        collisionIntentQueuedCount: 1,
+        collisionTransitionAppliedCount: 0,
         droppedSnapshotCount: 112,
         maximumSnapshotIntervalMs: 34.2,
         commandQueueDepth: 2,
@@ -62,12 +65,20 @@ function worldEvent(
         rejectedCommandCount: 1,
         commandPressureEventCount: 0,
       },
+      collision: {
+        firstPhraseId: 'bass',
+        secondPhraseId: 'drums',
+        touching: false,
+        cooldownRemainingMs: 0,
+      },
       phrases: [
         {
           id: 'drums',
           name: 'DRUMS',
           role: 'rhythm',
           currentVariantId: 'A',
+          pendingVariantId: null,
+          pendingVariantApplyBeat: null,
           midiChannel: 10,
           position: { x: 0.78, y: 0.58 },
           velocity: { x: -0.055, y: -0.035 },
@@ -81,6 +92,8 @@ function worldEvent(
           name: 'BASS',
           role: 'bass',
           currentVariantId: 'A',
+          pendingVariantId: null,
+          pendingVariantApplyBeat: null,
           midiChannel: 1,
           position: { x: 0.2, y: 0.28 },
           velocity: { x: 0.045, y: 0.025 },
@@ -94,6 +107,8 @@ function worldEvent(
           name: 'CHORDS',
           role: 'harmony',
           currentVariantId: 'A',
+          pendingVariantId: null,
+          pendingVariantApplyBeat: null,
           midiChannel: 2,
           position: { x: 0.45, y: 0.76 },
           velocity: { x: 0.035, y: -0.04 },
@@ -107,6 +122,8 @@ function worldEvent(
           name: 'MELODY',
           role: 'lead',
           currentVariantId: 'A',
+          pendingVariantId: null,
+          pendingVariantApplyBeat: null,
           midiChannel: 3,
           position: { x: 0.74, y: 0.2 },
           velocity: { x: -0.04, y: 0.05 },
@@ -191,6 +208,9 @@ describe('Drift bridge interface', () => {
             physicsStepCount: 1200,
             physicsCatchUpStepCount: 8,
             physicsCatchUpLimitHitCount: 1,
+            collisionContactBeginCount: 2,
+            collisionIntentQueuedCount: 1,
+            collisionTransitionAppliedCount: 0,
             commandQueueDepth: 2,
             maximumCommandQueueDepth: 7,
             coalescedMoveCount: 12,
@@ -258,6 +278,11 @@ describe('Drift bridge interface', () => {
     invalidDiagnostics.payload.diagnostics.droppedSnapshotCount = -1
     eventListener?.(invalidDiagnostics)
     expect(receivedWorldSequence).toBe(5)
+
+    const invalidPending = worldEvent(8)
+    invalidPending.payload.phrases[1].pendingVariantId = 'B'
+    eventListener?.(invalidPending)
+    expect(receivedWorldSequence).toBe(5)
   })
 
   it('renders four phrases from the latest authoritative world snapshot', () => {
@@ -275,9 +300,22 @@ describe('Drift bridge interface', () => {
     expect(screen.getByText('4 roles / 4 beats')).toBeTruthy()
     expect(container.textContent).toContain('112 snapshots')
     expect(container.textContent).toContain('34.2 ms')
+    expect(container.textContent).toContain('2 contacts / 1 queued / 0 applied')
+
+    const pendingWorld = worldEvent(5)
+    pendingWorld.payload.phrases[1].pendingVariantId = 'B'
+    pendingWorld.payload.phrases[1].pendingVariantApplyBeat = 4
+    act(() => bridge.publish(pendingWorld))
+    expect(screen.getByText(/BASS · A → B/)).toBeTruthy()
+
+    const appliedWorld = worldEvent(6)
+    appliedWorld.payload.phrases[1].currentVariantId = 'B'
+    act(() => bridge.publish(appliedWorld))
+    expect(screen.getByText(/BASS · B · playing/)).toBeTruthy()
+    expect(container.textContent).not.toContain('BASS · A → B')
 
     act(() => {
-      bridge.publish(worldEvent(3, { phrases: [] }))
+      bridge.publish(worldEvent(4, { phrases: [] }))
     })
     expect(container.querySelectorAll('[data-phrase-id]')).toHaveLength(4)
   })

@@ -17,6 +17,9 @@ export interface EngineDiagnostics {
   physicsStepCount: number
   physicsCatchUpStepCount: number
   physicsCatchUpLimitHitCount: number
+  collisionContactBeginCount: number
+  collisionIntentQueuedCount: number
+  collisionTransitionAppliedCount: number
   commandQueueDepth: number
   maximumCommandQueueDepth: number
   coalescedMoveCount: number
@@ -31,6 +34,8 @@ export interface PhraseSnapshot {
   name: string
   role: PhraseRole
   currentVariantId: string
+  pendingVariantId: string | null
+  pendingVariantApplyBeat: number | null
   midiChannel: number
   position: { x: number; y: number }
   velocity: { x: number; y: number }
@@ -44,6 +49,9 @@ export interface WorldDiagnostics {
   physicsStepCount: number
   physicsCatchUpStepCount: number
   physicsCatchUpLimitHitCount: number
+  collisionContactBeginCount: number
+  collisionIntentQueuedCount: number
+  collisionTransitionAppliedCount: number
   droppedSnapshotCount: number
   maximumSnapshotIntervalMs: number
   commandQueueDepth: number
@@ -63,6 +71,12 @@ export interface WorldSnapshot {
     beat: number
   }
   phrases: PhraseSnapshot[]
+  collision: {
+    firstPhraseId: string
+    secondPhraseId: string
+    touching: boolean
+    cooldownRemainingMs: number
+  }
   diagnostics: WorldDiagnostics
 }
 
@@ -99,6 +113,9 @@ export const initialTransportState: TransportState = {
     physicsStepCount: 0,
     physicsCatchUpStepCount: 0,
     physicsCatchUpLimitHitCount: 0,
+    collisionContactBeginCount: 0,
+    collisionIntentQueuedCount: 0,
+    collisionTransitionAppliedCount: 0,
     commandQueueDepth: 0,
     maximumCommandQueueDepth: 0,
     coalescedMoveCount: 0,
@@ -112,10 +129,19 @@ export const initialWorldSnapshot: WorldSnapshot = {
   engineTimeMs: 0,
   transport: { playing: false, bpm: 120, bar: 1, beat: 1 },
   phrases: [],
+  collision: {
+    firstPhraseId: 'bass',
+    secondPhraseId: 'drums',
+    touching: false,
+    cooldownRemainingMs: 0,
+  },
   diagnostics: {
     physicsStepCount: 0,
     physicsCatchUpStepCount: 0,
     physicsCatchUpLimitHitCount: 0,
+    collisionContactBeginCount: 0,
+    collisionIntentQueuedCount: 0,
+    collisionTransitionAppliedCount: 0,
     droppedSnapshotCount: 0,
     maximumSnapshotIntervalMs: 0,
     commandQueueDepth: 0,
@@ -270,6 +296,9 @@ function isTransportState(payload: unknown): payload is TransportState {
     typeof diagnostics.physicsStepCount === 'number' &&
     typeof diagnostics.physicsCatchUpStepCount === 'number' &&
     typeof diagnostics.physicsCatchUpLimitHitCount === 'number' &&
+    typeof diagnostics.collisionContactBeginCount === 'number' &&
+    typeof diagnostics.collisionIntentQueuedCount === 'number' &&
+    typeof diagnostics.collisionTransitionAppliedCount === 'number' &&
     typeof diagnostics.commandQueueDepth === 'number' &&
     typeof diagnostics.maximumCommandQueueDepth === 'number' &&
     typeof diagnostics.coalescedMoveCount === 'number' &&
@@ -284,6 +313,7 @@ function isWorldSnapshot(payload: unknown): payload is WorldSnapshot {
   const snapshot = payload as Partial<WorldSnapshot>
   const transport = snapshot.transport as Partial<WorldSnapshot['transport']> | undefined
   const diagnostics = snapshot.diagnostics as Partial<WorldDiagnostics> | undefined
+  const collision = snapshot.collision as Partial<WorldSnapshot['collision']> | undefined
   const validRoles: PhraseRole[] = ['rhythm', 'bass', 'harmony', 'lead']
 
   if (
@@ -298,6 +328,14 @@ function isWorldSnapshot(payload: unknown): payload is WorldSnapshot {
     !Number.isSafeInteger(transport.bar) ||
     !isFiniteNumber(transport.beat) ||
     !Array.isArray(snapshot.phrases) ||
+    typeof collision !== 'object' ||
+    collision === null ||
+    !isMessageId(collision.firstPhraseId) ||
+    !isMessageId(collision.secondPhraseId) ||
+    collision.firstPhraseId === collision.secondPhraseId ||
+    typeof collision.touching !== 'boolean' ||
+    !isFiniteNumber(collision.cooldownRemainingMs) ||
+    collision.cooldownRemainingMs < 0 ||
     typeof diagnostics !== 'object' ||
     diagnostics === null ||
     !Number.isSafeInteger(diagnostics.physicsStepCount) ||
@@ -306,6 +344,12 @@ function isWorldSnapshot(payload: unknown): payload is WorldSnapshot {
     (diagnostics.physicsCatchUpStepCount ?? -1) < 0 ||
     !Number.isSafeInteger(diagnostics.physicsCatchUpLimitHitCount) ||
     (diagnostics.physicsCatchUpLimitHitCount ?? -1) < 0 ||
+    !Number.isSafeInteger(diagnostics.collisionContactBeginCount) ||
+    (diagnostics.collisionContactBeginCount ?? -1) < 0 ||
+    !Number.isSafeInteger(diagnostics.collisionIntentQueuedCount) ||
+    (diagnostics.collisionIntentQueuedCount ?? -1) < 0 ||
+    !Number.isSafeInteger(diagnostics.collisionTransitionAppliedCount) ||
+    (diagnostics.collisionTransitionAppliedCount ?? -1) < 0 ||
     !Number.isSafeInteger(diagnostics.droppedSnapshotCount) ||
     (diagnostics.droppedSnapshotCount ?? -1) < 0 ||
     !isFiniteNumber(diagnostics.maximumSnapshotIntervalMs) ||
@@ -337,6 +381,12 @@ function isWorldSnapshot(payload: unknown): payload is WorldSnapshot {
       candidate.name.length > 0 &&
       validRoles.includes(candidate.role as PhraseRole) &&
       isMessageId(candidate.currentVariantId) &&
+      (candidate.pendingVariantId === null || isMessageId(candidate.pendingVariantId)) &&
+      (candidate.pendingVariantApplyBeat === null ||
+        (isFiniteNumber(candidate.pendingVariantApplyBeat) &&
+          candidate.pendingVariantApplyBeat >= 0)) &&
+      ((candidate.pendingVariantId === null) ===
+        (candidate.pendingVariantApplyBeat === null)) &&
       Number.isSafeInteger(candidate.midiChannel) &&
       (candidate.midiChannel ?? 0) >= 1 &&
       (candidate.midiChannel ?? 0) <= 16 &&

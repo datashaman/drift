@@ -148,6 +148,27 @@ bool SpatialWorld::containsPhrase (const std::string& phraseId) const noexcept
     });
 }
 
+std::vector<CollisionContact> SpatialWorld::consumeCollisionBegins()
+{
+    auto contacts = std::move (pendingCollisionBegins);
+    pendingCollisionBegins.clear();
+    return contacts;
+}
+
+CollisionPairState SpatialWorld::collisionPairState (
+    const std::string& firstPhraseId,
+    const std::string& secondPhraseId) const
+{
+    const auto state = collisionPairs.find (pairKey (firstPhraseId, secondPhraseId));
+    if (state == collisionPairs.end())
+        return {};
+
+    return {
+        state->second.touching,
+        static_cast<double> (state->second.cooldownStepsRemaining) * fixedStepSeconds,
+    };
+}
+
 const std::vector<PhraseBody>& SpatialWorld::bodies() const noexcept
 {
     return phraseBodies;
@@ -165,6 +186,10 @@ std::size_t SpatialWorld::revision() const noexcept
 
 void SpatialWorld::integrateStep()
 {
+    for (auto& pair : collisionPairs)
+        pair.second.cooldownStepsRemaining
+            = std::max (0, pair.second.cooldownStepsRemaining - 1);
+
     for (auto& body : phraseBodies)
     {
         if (body.dragged)
@@ -174,8 +199,65 @@ void SpatialWorld::integrateStep()
         integrateAxis (body.position.y, body.velocity.y, body.radius);
     }
 
+    detectCollisions();
+
     ++worldRevision;
     ++worldDiagnostics.physicsStepCount;
+}
+
+void SpatialWorld::detectCollisions()
+{
+    const auto cooldownSteps = static_cast<int> (
+        std::ceil (collisionCooldownSeconds / fixedStepSeconds));
+
+    for (std::size_t firstIndex = 0; firstIndex < phraseBodies.size(); ++firstIndex)
+    {
+        for (auto secondIndex = firstIndex + 1; secondIndex < phraseBodies.size(); ++secondIndex)
+        {
+            const auto& first = phraseBodies[firstIndex];
+            const auto& second = phraseBodies[secondIndex];
+            const auto distance = std::hypot (
+                first.position.x - second.position.x,
+                first.position.y - second.position.y);
+            const auto touching = distance <= first.radius + second.radius;
+            auto& state = collisionPairs[pairKey (first.phraseId, second.phraseId)];
+
+            if (! touching)
+            {
+                state.touching = false;
+                continue;
+            }
+
+            if (state.touching)
+                continue;
+
+            state.touching = true;
+            if (state.cooldownStepsRemaining > 0)
+                continue;
+
+            const auto [firstId, secondId] = orderedPair (
+                first.phraseId, second.phraseId);
+            pendingCollisionBegins.push_back ({ firstId, secondId });
+            state.cooldownStepsRemaining = cooldownSteps;
+            ++worldDiagnostics.collisionContactBeginCount;
+        }
+    }
+}
+
+std::pair<std::string, std::string> SpatialWorld::orderedPair (
+    const std::string& firstPhraseId,
+    const std::string& secondPhraseId)
+{
+    if (firstPhraseId <= secondPhraseId)
+        return { firstPhraseId, secondPhraseId };
+    return { secondPhraseId, firstPhraseId };
+}
+
+std::string SpatialWorld::pairKey (const std::string& firstPhraseId,
+                                   const std::string& secondPhraseId)
+{
+    const auto [firstId, secondId] = orderedPair (firstPhraseId, secondPhraseId);
+    return firstId + "\x1f" + secondId;
 }
 
 PhraseBody* SpatialWorld::findBody (const std::string& phraseId) noexcept
